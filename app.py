@@ -265,8 +265,8 @@ else:
     i_end = cycles[-1][1]
     t_end = float(t[i_end])
 
-        VOnT  = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
-        VOffT = float(t_end    - t_last) if (t_end    is not None and t_last is not None) else np.nan
+    VOnT  = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
+    VOffT = float(t_end    - t_last) if (t_end    is not None and t_last is not None) else np.nan
     else:
         VOnT, VOffT = np.nan, np.nan
 
@@ -381,6 +381,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
