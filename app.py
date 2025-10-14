@@ -149,7 +149,23 @@ def _last_steady_before_end(t, y, cycles, g_amp, K, ap_thr, tp_thr, amp_frac):
 
 import pandas as pd
 import numpy as np
-from scipy.signal import savgol_filter
+# Savitzky–Golay (scipy 없으면 이동평균으로 대체)
+try:
+    from scipy.signal import savgol_filter
+except Exception:
+    import numpy as np
+    def savgol_filter(x, window_length=11, polyorder=3, mode="interp"):
+        w = int(window_length)
+        if w < 3: 
+            return np.asarray(x, dtype=float)
+        if w % 2 == 0:
+            w += 1
+        max_allowed = len(x) if len(x) % 2 == 1 else len(x) - 1
+        w = min(max(3, w), max_allowed)
+        pad = w // 2
+        xp = np.pad(np.asarray(x, dtype=float), (pad, pad), mode="edge")
+        ker = np.ones(w, dtype=float) / w
+        return np.convolve(xp, ker, mode="valid")
 import streamlit as st
 
 # ---- optional savgol_filter (fallback to moving average) ----
@@ -216,27 +232,26 @@ def analyze(df, adv):
     else:
         return pd.DataFrame({"Parameter": [], "Value": []}), pd.DataFrame(), dict(fps=np.nan, n_cycles=0)
 
-    # ---- FPS ----
-dt  = np.median(np.diff(t))
+ # ---- FPS ----
+dt  = np.median(np.diff(t)) if len(t) > 1 else 0.0
 fps = 1.0 / dt if dt > 0 else 1500.0
 
-# ---- smoothing (Savitzky–Golay / fallback 안전 적용) ----
+# ---- smoothing (Savitzky–Golay / fallback) ----
 signal = np.asarray(total, dtype=float)
 
-# 창 길이 자동 결정: FPS 기준 7~21 사이, 홀수/길이 제한 보장
-base_w = int(max(7, min(21, round(fps * 0.007))))  # 대략 7ms 근처
+# 창 길이 자동 결정 (≈7ms, 7~21, 항상 홀수, 길이 안전)
+base_w  = int(max(7, min(21, round(fps * 0.007))))
 win_len = base_w if base_w % 2 == 1 else base_w + 1
-# 신호 길이를 넘지 않도록 조정 (항상 홀수 유지)
-if win_len >= len(signal):
-    win_len = len(signal) - 1 if len(signal) % 2 == 0 else len(signal)
-if win_len < 3:
+if len(signal) <= 3:
     win_len = 3
+else:
+    max_allowed = len(signal) if len(signal) % 2 == 1 else len(signal) - 1
+    win_len = min(max(3, win_len), max_allowed)
 
-# scipy가 있으면 savgol_filter 사용, 없으면 우리가 만든 fallback 이동평균이 호출됨
 smoothed = savgol_filter(signal, window_length=win_len, polyorder=3, mode="interp")
 
-    # ---- Dummy cycles (임시 cycle 검출 대체) ----
-cycles = [(i, i+10) for i in range(0, max(0, len(smoothed)-10), 10)]
+# ---- Dummy cycles (임시 cycle 검출) ----
+cycles = [(i, i+10) for i in range(0, max(0, len(smoothed) - 10), 10)]
 
     # ==========================================================
     # Onset / Offset detection (savgol_filter 기반)
@@ -296,7 +311,6 @@ amp_ref = float(np.percentile(np.abs(stable_region - stable_mean), 95)) if len(s
         ],
         "Value": [0.97, 0.98, 0.73, 0.009, VOnT, VOffT]
     })
-
     per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
     extras = dict(fps=fps, n_cycles=len(cycles))
     return summary, per_cycle, extras
@@ -372,6 +386,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
