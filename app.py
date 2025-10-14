@@ -303,21 +303,20 @@ for idx, (s, e) in enumerate(cycles):
 per_cycle = pd.DataFrame(rows)
 
     # ---- summary & extras ----
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "Amplitude Symmetry (AS)",
-            "Phase Symmetry (PS)",
-            "Voice Onset Time (VOnT, s)",
-            "Voice Offset Time (VOffT, s)",
-        ],
-        "Value": [AP, TP, AS, PS, VOnT, VOffT]
-    })
+  summary = pd.DataFrame({
+    "Parameter": [
+        "Amplitude Periodicity (AP)",
+        "Time Periodicity (TP)",
+        "Amplitude Symmetry (AS)",
+        "Phase Symmetry (PS)",
+        "Voice Onset Time (VOnT, s)",
+        "Voice Offset Time (VOffT, s)",
+    ],
+    "Value": [AP, TP, AS, PS, VOnT, VOffT]
+})
 
-    extras = dict(fps=fps, n_cycles=len(cycles))
-    return summary, per_cycle, extras
-
+extras = dict(fps=fps, n_cycles=len(cycles))
+return summary, per_cycle, extras
 # ---------------------- UI ----------------------
 
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
@@ -392,6 +391,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
