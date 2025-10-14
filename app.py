@@ -1,74 +1,338 @@
+# HSV Auto Analyzer - Version 2.1 (Refined Engine)
+# - Keeps AP/TP/AS/PS and adds VOnT/VOffT with robust cycle detection
+# - One-file input: time + (left/right or total) [+ optional onset/offset]
+# - Advanced settings (baseline length, thresholds) in an expander
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="HSV Auto Analyzer", layout="wide")
+st.set_page_config(page_title="HSV Auto Analyzer v2.1", layout="wide")
 
-st.title("🪄 HSV Auto Analyzer")
-st.markdown("Amplitude & Time Periodicity, Amplitude & Phase Symmetry 자동 계산기")
+st.title("🧠 HSV Auto Analyzer v2.1")
+st.caption("Amplitude/Time Periodicity, Amplitude/Phase Symmetry, Voice Onset/Offset Time – 정밀 계산 엔진")
 
-uploaded_file = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
+# ---------------------- Utils ----------------------
 
-if uploaded_file:
-    # 파일 읽기
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
+def _norm_cols(cols):
+    return [c.lower().strip().replace(" ", "_") for c in cols]
+
+@st.cache_data
+def load_table(file):
+    if file.name.endswith(".csv"):
+        df = pd.read_csv(file)
     else:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(file, sheet_name=0)
+    df.columns = _norm_cols(df.columns)
+    return df
 
-    st.subheader("📊 데이터 미리보기")
-    st.dataframe(df.head())
+# Peak detection (simple and fast)
+def _detect_peaks(y):
+    y = np.asarray(y)
+    if len(y) < 3:
+        return np.array([], dtype=int)
+    dy1 = y[1:-1] - y[:-2]
+    dy2 = y[1:-1] - y[2:]
+    idx = np.where((dy1 > 0) & (dy2 >= 0))[0] + 1
+    return idx
 
-    # 열 이름 자동 탐지
-    time_col = [c for c in df.columns if 'time' in c.lower()][0]
-    left_col = [c for c in df.columns if 'left' in c.lower()][0]
-    right_col = [c for c in df.columns if 'right' in c.lower()][0]
+# Moving RMS on |Δx|
+def _moving_rms(diff, w):
+    if w <= 1:
+        return np.sqrt(np.maximum(diff**2, 0))
+    pad = w // 2
+    xp = np.pad(diff, (pad, pad), mode="edge")
+    k = np.ones(w) / w
+    return np.sqrt(np.convolve(xp**2, k, mode="valid"))
 
-    time = df[time_col].values
-    left = df[left_col].values
-    right = df[right_col].values
+# Build cycles from peaks (closed phase bright → peaks on -total)
 
-    N = len(time)
+def _build_cycles(t, total, min_frames=5):
+    peaks = _detect_peaks(-total)
+    cycles = []
+    for i in range(len(peaks) - 1):
+        s, e = int(peaks[i]), int(peaks[i + 1])
+        if (e - s) >= min_frames:
+            cycles.append((s, e))
+    return cycles
 
-    # ---------- 1. Amplitude Periodicity ----------
-    amp_min = np.minimum(left[:-1], left[1:])
-    amp_max = np.maximum(left[:-1], left[1:])
-    amplitude_periodicity = np.mean(amp_min / amp_max)
+# Per-cycle metrics
 
-    # ---------- 2. Time Periodicity ----------
-    Ti = np.diff(time)
-    time_periodicity = np.mean(np.minimum(Ti[:-1], Ti[1:]) / np.maximum(Ti[:-1], Ti[1:]))
+def _periods_amps(t, y, cycles):
+    periods, amps = [], []
+    for s, e in cycles:
+        seg_t = t[s:e]
+        seg_y = y[s:e]
+        if len(seg_t) < 2:
+            continue
+        periods.append(float(seg_t[-1] - seg_t[0]))
+        amps.append(float(np.nanmax(seg_y) - np.nanmin(seg_y)))
+    return np.asarray(periods), np.asarray(amps)
 
-    # ---------- 3. Amplitude Symmetry ----------
-    amplitude_symmetry = np.mean(np.maximum(left, right) / np.minimum(left, right))
-    
-    # ---------- 4. Phase Symmetry ----------
-    Ti_total = np.mean(Ti)
-    phase_symmetry = np.mean(np.abs((left - right) / (left + right + 1e-9)))
+# AP / TP from adjacent cycles
 
-    # ---------- 결과 요약 ----------
-    results = pd.DataFrame({
-        "Parameter": ["Amplitude Periodicity", "Time Periodicity", "Amplitude Symmetry", "Phase Symmetry"],
-        "Value": [amplitude_periodicity, time_periodicity, amplitude_symmetry, phase_symmetry]
+def _ap_tp(t, y, cycles):
+    periods, amps = _periods_amps(t, y, cycles)
+    ap, tp = [], []
+    for i in range(len(amps) - 1):
+        a, b = amps[i], amps[i + 1]
+        m = max(a, b)
+        ap.append(min(a, b) / m if m > 0 else np.nan)
+    for i in range(len(periods) - 1):
+        a, b = periods[i], periods[i + 1]
+        m = max(a, b)
+        tp.append(min(a, b) / m if m > 0 else np.nan)
+    return (np.nanmean(ap) if len(ap) else np.nan,
+            (np.nanmean(tp) if len(tp) else np.nan), periods, amps)
+
+# AS (amplitude symmetry) – range-based per cycle (left/right)
+
+def _as_range(left, right, cycles):
+    if left is None or right is None or len(cycles) == 0:
+        return np.nan
+    ratios = []
+    for s, e in cycles:
+        L = float(np.nanmax(left[s:e]) - np.nanmin(left[s:e]))
+        R = float(np.nanmax(right[s:e]) - np.nanmin(right[s:e]))
+        if max(L, R) > 0:
+            ratios.append(min(L, R) / max(L, R))
+    return np.nanmean(ratios) if ratios else np.nan
+
+# PS (phase symmetry) – |t_left(max) - t_right(max)| / T_i
+
+def _ps(left, right, t, cycles):
+    if left is None or right is None or len(cycles) == 0:
+        return np.nan
+    vals = []
+    for s, e in cycles:
+        li = s + int(np.nanargmax(left[s:e]))
+        ri = s + int(np.nanargmax(right[s:e]))
+        Ti = float(t[e] - t[s]) if (e > s) else np.nan
+        if Ti and Ti > 0:
+            vals.append(abs(float(t[li] - t[ri])) / Ti)
+    return np.nanmean(vals) if vals else np.nan
+
+# Steady windows for VOnT/VOffT
+
+def _first_steady_from(t, y, cycles, g_amp, start_frame, K, ap_thr, tp_thr, amp_frac):
+    periods, amps = _periods_amps(t, y, cycles)
+    starts = np.array([s for s, _ in cycles], dtype=int)
+    for j in range(0, len(cycles) - K):
+        if starts[j] < start_frame:
+            continue
+        subA = amps[j:j + K]
+        subP = periods[j:j + K]
+        ap_vals, tp_vals = [], []
+        for i in range(K - 1):
+            aa, bb = subA[i], subA[i + 1]; m = max(aa, bb); ap_vals.append(min(aa, bb) / m if m > 0 else np.nan)
+            aa, bb = subP[i], subP[i + 1]; m = max(aa, bb); tp_vals.append(min(aa, bb) / m if m > 0 else np.nan)
+        if (np.nanmin(ap_vals) >= ap_thr) and (np.nanmin(tp_vals) >= tp_thr) and (np.nanmin(subA) >= amp_frac * g_amp):
+            return starts[j], float(t[starts[j]])
+    return None, None
+
+
+def _last_steady_before_end(t, y, cycles, g_amp, K, ap_thr, tp_thr, amp_frac):
+    periods, amps = _periods_amps(t, y, cycles)
+    ends = np.array([e for _, e in cycles], dtype=int)
+    for j_end in range(len(cycles), K - 1, -1):
+        j = j_end - K
+        subA = amps[j:j + K]
+        subP = periods[j:j + K]
+        ap_vals, tp_vals = [], []
+        for i in range(K - 1):
+            aa, bb = subA[i], subA[i + 1]; m = max(aa, bb); ap_vals.append(min(aa, bb) / m if m > 0 else np.nan)
+            aa, bb = subP[i], subP[i + 1]; m = max(aa, bb); tp_vals.append(min(aa, bb) / m if m > 0 else np.nan)
+        if (np.nanmin(ap_vals) >= ap_thr) and (np.nanmin(tp_vals) >= tp_thr) and (np.nanmin(subA) >= amp_frac * g_amp):
+            return ends[j + K - 1], float(t[ends[j + K - 1]])
+    return None, None
+
+# Main analyzer
+
+def analyze(df, adv):
+    # column mapping (lenient)
+    cols = df.columns.tolist()
+    time_col = next((c for c in cols if 'time' in c), None)
+    left_col = next((c for c in cols if 'left' in c), None)
+    right_col = next((c for c in cols if 'right' in c), None)
+    total_col = next((c for c in cols if 'total' in c), None)
+    onset_col = next((c for c in cols if 'onset' in c), None)
+    offset_col = next((c for c in cols if 'offset' in c), None)
+
+    if time_col is None:
+        st.stop()
+
+    t = df[time_col].astype(float).values
+    if t.max() > 10:  # ms → s
+        t = t / 1000.0
+
+    if total_col:
+        total = df[total_col].astype(float).values
+    elif left_col and right_col:
+        total = (df[left_col].astype(float).values + df[right_col].astype(float).values) / 2.0
+    else:
+        st.error("left/right 또는 total 열이 필요합니다.")
+        st.stop()
+
+    left = df[left_col].astype(float).values if left_col else None
+    right = df[right_col].astype(float).values if right_col else None
+
+    # FPS estimate & windows
+    dt = np.median(np.diff(t)) if len(t) > 1 else 0
+    fps = (1.0 / dt) if dt > 0 else 1500.0
+    W = max(int(round((adv['W_ms'] / 1000.0) * fps)), 3)
+
+    # Cycles
+    min_frames = max(int(0.002 * fps), 5)
+    cycles = _build_cycles(t, total, min_frames=min_frames)
+
+    AP, TP, periods, amps = _ap_tp(t, total, cycles)
+    AS = _as_range(left, right, cycles)
+    PS = _ps(left, right, t, cycles)
+
+    # ---------- VOnT / VOffT ----------
+    diff = np.abs(np.diff(total, prepend=total[0]))
+    E = _moving_rms(diff, W)
+
+    nB = max(int(round(adv['baseline_s'] * fps)), 5)
+    base = E[:min(nB, len(E))]
+    mu0 = float(np.mean(base)) if len(base) else 0.0
+    sigma0 = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
+    thr = mu0 + adv['k'] * sigma0
+
+    above = (E > thr).astype(int)
+    run = np.convolve(above, np.ones(adv['M'], dtype=int), mode="same")
+    idx_move = np.where(run >= adv['M'])[0]
+    i_move = int(idx_move[0]) if len(idx_move) else None
+
+    if len(cycles) >= 3:
+        g_amp = float(np.nanmax([np.nanmax(total[s:e]) - np.nanmin(total[s:e]) for s, e in cycles]))
+        if i_move is None:
+            i_move = cycles[0][0]
+        t_move = float(t[i_move])
+        i_steady, t_steady = _first_steady_from(t, total, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+        if i_steady is None:
+            i_steady, t_steady = cycles[0][0], float(t[cycles[0][0]])
+        i_last, t_last = _last_steady_before_end(t, total, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+        if i_last is None:
+            i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
+        below = (E <= thr).astype(int)
+        runb = np.convolve(below, np.ones(adv['M'], dtype=int), mode="same")
+        cand = np.where((np.arange(len(E)) >= i_last) & (runb >= adv['M']))[0]
+        if len(cand):
+            i_end = int(cand[0]); t_end = float(t[i_end])
+        else:
+            i_end = cycles[-1][1]; t_end = float(t[i_end])
+        VOnT = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
+        VOffT = float(t_end - t_last) if (t_end is not None and t_last is not None) else np.nan
+    else:
+        VOnT = np.nan; VOffT = np.nan
+
+    # Per-cycle detailed table
+    rows = []
+    for idx, (s, e) in enumerate(cycles):
+        period = float(t[e] - t[s]) if e > s else np.nan
+        amp = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
+        as_ratio = np.nan
+        ps_ratio = np.nan
+        if left is not None and right is not None and e > s:
+            L = float(np.nanmax(left[s:e]) - np.nanmin(left[s:e]))
+            R = float(np.nanmax(right[s:e]) - np.nanmin(right[s:e]))
+            as_ratio = (min(L, R) / max(L, R)) if max(L, R) > 0 else np.nan
+            li = s + int(np.nanargmax(left[s:e]))
+            ri = s + int(np.nanargmax(right[s:e]))
+            Ti = period
+            ps_ratio = abs(float(t[li] - t[ri])) / Ti if Ti and Ti > 0 else np.nan
+        rows.append(dict(cycle=idx + 1, start_time=float(t[s]), end_time=float(t[e]), period=period, amplitude=amp,
+                          AS_cycle=as_ratio, PS_cycle=ps_ratio))
+    per_cycle = pd.DataFrame(rows)
+
+    summary = pd.DataFrame({
+        "Parameter": [
+            "Amplitude Periodicity (AP)",
+            "Time Periodicity (TP)",
+            "Amplitude Symmetry (AS)",
+            "Phase Symmetry (PS)",
+            "Voice Onset Time (VOnT, s)",
+            "Voice Offset Time (VOffT, s)",
+        ],
+        "Value": [AP, TP, AS, PS, VOnT, VOffT]
     })
 
+    extras = dict(fps=fps, n_cycles=len(cycles))
+    return summary, per_cycle, extras
+
+# ---------------------- UI ----------------------
+
+uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
+
+with st.expander("⚙️ 고급 설정 (기본값 그대로 사용해도 충분)", expanded=False):
+    c1, c2, c3, c4, c5 = st.columns(5)
+    baseline_s = c1.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.15, step=0.01)
+    k = c2.number_input("임계 배수 k", min_value=1.0, max_value=6.0, value=3.0, step=0.1)
+    M = int(c3.number_input("연속 프레임 M", min_value=1, max_value=20, value=5, step=1))
+    K = int(c4.number_input("정상 연속 사이클 K", min_value=1, max_value=10, value=3, step=1))
+    W_ms = c5.number_input("에너지 창(ms)", min_value=2.0, max_value=40.0, value=10.0, step=1.0)
+
+    c6, c7, c8 = st.columns(3)
+    ap_thr = c6.slider("AP 임계", 0.70, 1.00, 0.90, 0.01)
+    tp_thr = c7.slider("TP 임계", 0.70, 1.00, 0.95, 0.01)
+    amp_frac = c8.slider("정상 최소 진폭 (max의 비율)", 0.10, 0.80, 0.30, 0.01)
+
+adv = dict(baseline_s=baseline_s if 'baseline_s' in locals() else 0.15,
+           k=k if 'k' in locals() else 3.0,
+           M=M if 'M' in locals() else 5,
+           K=K if 'K' in locals() else 3,
+           W_ms=W_ms if 'W_ms' in locals() else 10.0,
+           ap_thr=ap_thr if 'ap_thr' in locals() else 0.90,
+           tp_thr=tp_thr if 'tp_thr' in locals() else 0.95,
+           amp_frac=amp_frac if 'amp_frac' in locals() else 0.30)
+
+if uploaded:
+    df = load_table(uploaded)
+    st.subheader("📋 데이터 미리보기")
+    st.dataframe(df.head(), use_container_width=True)
+
+    try:
+        summary, per_cycle, extras = analyze(df, adv)
+    except Exception as e:
+        st.exception(e)
+        st.stop()
+
     st.subheader("✅ 결과 요약")
-    st.dataframe(results, use_container_width=True)
+    st.dataframe(summary, use_container_width=True)
 
-    # ---------- 5. 그래프 ----------
-    st.subheader("📈 좌우 Gray Value 변화")
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(time, left, label="Left gray", color="blue")
-    ax.plot(time, right, label="Right gray", color="red", linestyle="--")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Gray value")
-    ax.legend()
-    st.pyplot(fig)
+    st.info(f"FPS 추정값: {extras['fps']:.1f} | 탐지된 사이클 수: {extras['n_cycles']}")
 
-    # ---------- 6. 다운로드 ----------
-    csv = results.to_csv(index=False).encode('utf-8-sig')
-    st.download_button("💾 결과 다운로드 (CSV)", csv, file_name="HSV_results.csv", mime="text/csv")
+    # Downloads
+    c1, c2 = st.columns(2)
+    c1.download_button("💾 요약 CSV 다운로드", data=summary.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="HSV_summary_v2_1.csv", mime="text/csv")
+    c2.download_button("📦 사이클별 CSV 다운로드", data=per_cycle.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="HSV_cycles_v2_1.csv", mime="text/csv")
 
+    # Lightweight plot (v3에서 고급 시각화 예정)
+    st.subheader("📈 Total Gray (개략) – 고급 시각화는 v3에서 제공")
+    time_col = next((c for c in df.columns if 'time' in c), None)
+    total_col = next((c for c in df.columns if 'total' in c), None)
+    left_col = next((c for c in df.columns if 'left' in c), None)
+    right_col = next((c for c in df.columns if 'right' in c), None)
+
+    t = df[time_col].astype(float).values
+    if t.max() > 10:
+        t = t / 1000.0
+    if total_col:
+        total = df[total_col].astype(float).values
+    elif left_col and right_col:
+        total = (df[left_col].astype(float).values + df[right_col].astype(float).values) / 2.0
+    else:
+        total = None
+
+    if total is not None:
+        fig, ax = plt.subplots(figsize=(9, 3))
+        ax.plot(t, total)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Total gray value")
+        st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
