@@ -193,72 +193,80 @@ def analyze(df, adv):
     AS = _as_range(left, right, cycles)
     PS = _ps(left, right, t, cycles)
 
-    # ---------- VOnT / VOffT (signal-guided with onset/offset) ----------
-    diff_total = np.abs(np.diff(total, prepend=total[0]))
-    E_total = _moving_rms(diff_total, W)
+   # ---------- VOnT / VOffT (stabilized detection ver. by Lian) ----------
+import numpy as np
+from scipy.signal import savgol_filter
 
-    onset_series  = df[onset_col].astype(float).values  if onset_col  else None
-    offset_series = df[offset_col].astype(float).values if offset_col else None
+# Step 1. 기본 신호 및 스무딩
+signal = total.astype(float)
+smoothed = savgol_filter(signal, window_length=11, polyorder=3, mode="interp")
 
-    E_on  = _moving_rms(np.abs(np.diff(onset_series,  prepend=onset_series[0])),  W) if onset_series  is not None else E_total
-    E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W) if offset_series is not None else E_total
+# Step 2. 안정구간(마지막 20%) 기준으로 기준 진폭 계산
+stable_start = int(len(smoothed) * 0.8)
+stable_region = smoothed[stable_start:]
+amp_ref = np.percentile(np.abs(stable_region - np.mean(stable_region)), 95)
 
-    nB = max(int(round(adv['baseline_s'] * fps)), 5)
-    def _thr(E):
-        base = E[:min(nB, len(E))]
-        mu0  = float(np.mean(base)) if len(base) else 0.0
-        s0   = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
-        return mu0 + adv['k'] * s0
+# Step 3. 임계치 (히스테리시스 적용)
+th_on = amp_ref * 0.10   # 10% 이상이면 onset으로 간주
+th_off = amp_ref * 0.07  # 7% 미만이면 offset으로 간주
 
-    thr_on, thr_off = _thr(E_on), _thr(E_off)
-    above_on, above_off = (E_on > thr_on).astype(int), (E_off > thr_off).astype(int)
-    run_on  = np.convolve(above_on,  np.ones(adv['M'], dtype=int), mode="same")
-    run_off = np.convolve(above_off, np.ones(adv['M'], dtype=int), mode="same")
+# Step 4. 기준선 제거 및 절대 진폭 계산
+centered = smoothed - np.mean(stable_region)
+amp = np.abs(centered)
 
-    # 움직임 시작: onset 기반(+fallback) — 활성(run) 구간의 '시작' 인덱스
-    on_run    = (run_on >= adv['M']).astype(int)
-    on_edges  = np.diff(np.r_[0, on_run, 0])
-    on_starts = np.where(on_edges == 1)[0]
-    i_move = int(on_starts[0]) if len(on_starts) else None
+# Step 5. 연속 프레임 조건
+min_frames = int((10 / 1000) * fps)  # 최소 10ms 이상 지속해야 인정
 
-    # steady/last-steady는 total 기반
-    if len(cycles) >= 3:
-        g_amp = float(np.nanmax([np.nanmax(total[s:e]) - np.nanmin(total[s:e]) for s, e in cycles]))
-        if i_move is None:
-            i_move = cycles[0][0]
-        t_move = float(t[i_move])
+above = amp > th_on
+below = amp < th_off
 
-        i_steady, t_steady = _first_steady_from(
-            t, total, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
-        )
-        if i_steady is None:
-            i_steady, t_steady = cycles[0][0], float(t[cycles[0][0]])
+onset_index = None
+offset_index = None
+count = 0
 
-        i_last, t_last = _last_steady_before_end(
-            t, total, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
-        )
-        if i_last is None:
-            i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
-
-        # 움직임 종료: offset 기반(+fallback) — i_last 이후 '마지막' 활성(run)의 '끝'
-        off_run    = (run_off >= adv['M']).astype(int)
-        off_edges  = np.diff(np.r_[0, off_run, 0])
-        off_starts = np.where(off_edges == 1)[0]
-        off_ends   = np.where(off_edges == -1)[0] - 1
-
-        m = np.where(off_starts >= i_last)[0]
-        if len(m):
-            j = m[-1]
-            i_end = int(off_ends[j])
-            t_end = float(t[min(i_end, len(t) - 1)])
-        else:
-            i_end = cycles[-1][1]
-            t_end = float(t[i_end])
-
-        VOnT  = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
-        VOffT = float(t_end    - t_last) if (t_end    is not None and t_last is not None) else np.nan
+# --- Onset 탐지 ---
+for i in range(len(above)):
+    if above[i]:
+        count += 1
+        if count >= min_frames and onset_index is None:
+            onset_index = i - count + 1
+            break
     else:
-        VOnT, VOffT = np.nan, np.nan
+        count = 0
+
+# --- Offset 탐지 ---
+count = 0
+start_idx = onset_index or 0
+for i in range(start_idx, len(below)):
+    if below[i]:
+        count += 1
+        if count >= min_frames:
+            offset_index = i - count + 1
+            break
+    else:
+        count = 0
+
+# Step 6. 시간 환산 (초 단위)
+onset_time_s = onset_index / fps if onset_index is not None else np.nan
+offset_time_s = offset_index / fps if offset_index is not None else np.nan
+
+# Step 7. 주기 기반 보정 (steady 구간 및 마지막 steady 반영)
+if len(cycles) >= 3:
+    first_cycle = cycles[0]
+    last_cycle = cycles[-1]
+    t_move = float(t[first_cycle[0]]) if onset_index is None else onset_time_s
+    t_end  = float(t[last_cycle[1]]) if offset_index is None else offset_time_s
+    t_steady = float(t[cycles[1][0]]) if len(cycles) > 1 else t_move
+    t_last   = float(t[cycles[-2][1]]) if len(cycles) > 2 else t_end
+
+    VOnT  = float(t_steady - t_move) if not np.isnan(t_steady) and not np.isnan(t_move) else np.nan
+    VOffT = float(t_end - t_last)    if not np.isnan(t_end) and not np.isnan(t_last) else np.nan
+else:
+    VOnT, VOffT = np.nan, np.nan
+
+# Step 8. 작은 값(잡음 수준) 정리
+if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
+if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
 
     # 너무 작은 값은 0으로 정리(원하면 np.nan으로 바꿔도 됨)
     if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
@@ -371,6 +379,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
