@@ -223,10 +223,10 @@ def analyze(df, adv):
     AS = _as_range(left, right, cycles)
     PS = _ps(left, right, t, cycles)
 
-    # ---------- VOnT / VOffT ----------
-    # energy from changes
+    # ---------- VOnT / VOffT (개선판: 조용구간 + 런 길이 조건) ----------
+    # 1) 에너지 계산 (이미 smoothing 된 smoothed 기반)
     diff_total = np.abs(np.diff(smoothed, prepend=smoothed[0]))
-    W = max(int(round((adv['W_ms'] / 1000.0) * fps)), 3)
+    W = max(int(round((adv['W_ms'] / 1000.0) * fps)), 3)        # 에너지 창
     E_total = _moving_rms(diff_total, W)
 
     onset_series  = df[onset_col].astype(float).values  if onset_col  else None
@@ -235,6 +235,7 @@ def analyze(df, adv):
     E_on  = _moving_rms(np.abs(np.diff(onset_series,  prepend=onset_series[0])),  W) if onset_series  is not None else E_total
     E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W) if offset_series is not None else E_total
 
+    # 2) 베이스라인에서 임계값(μ + k·σ)
     nB = max(int(round(adv['baseline_s'] * fps)), 5)
     def _thr(E):
         base = E[:min(nB, len(E))]
@@ -243,49 +244,75 @@ def analyze(df, adv):
         return mu0 + adv['k'] * s0
 
     thr_on, thr_off = _thr(E_on), _thr(E_off)
-    above_on, above_off = (E_on > thr_on).astype(int), (E_off > thr_off).astype(int)
-    run_on  = np.convolve(above_on,  np.ones(adv['M'], dtype=int), mode="same")
-    run_off = np.convolve(above_off, np.ones(adv['M'], dtype=int), mode="same")
 
-    # 움직임 시작: run_on 활성구간 첫 시작
-    on_run    = (run_on >= adv['M']).astype(int)
-    on_edges  = np.diff(np.r_[0, on_run, 0])
-    on_starts = np.where(on_edges == 1)[0]
-    i_move = int(on_starts[0]) if len(on_starts) else (cycles[0][0] if len(cycles) else 0)
+    # 3) 일정 길이(min_len=M) 이상 지속되는 run(start~end) 추출
+    def _runs(mask_bool, min_len):
+        m = mask_bool.astype(int)
+        edges = np.diff(np.r_[0, m, 0])
+        starts = np.where(edges == 1)[0]
+        ends   = np.where(edges == -1)[0] - 1
+        keep   = np.where((ends - starts + 1) >= min_len)[0]
+        return starts[keep], ends[keep]
+
+    runs_on_st, runs_on_en   = _runs(E_on  > thr_on,  adv['M'])
+    runs_off_st, runs_off_en = _runs(E_off > thr_off, adv['M'])
+
+    # 4) '조용구간' 조건: run 전/후로 조용한 기간(quiet_ms) 확보
+    quiet_ms = float(adv.get('quiet_ms', 30.0))                  # UI가 없어도 기본 30ms
+    quiet_n  = max(int(round(quiet_ms / 1000.0 * fps)), 1)
+
+    def _has_quiet_before(arr, idx, qn):
+        s = max(0, idx - qn)
+        return bool(np.all(arr[s:idx] <= thr_on)) if idx > 0 else True
+
+    def _has_quiet_after(arr, idx, qn):
+        e = min(len(arr), idx + qn)
+        return bool(np.all(arr[idx:e] <= thr_off)) if idx < len(arr) else True
+
+    # 5) movement 시작(i_move): on-run들 중 '조용구간 뒤' 최초 run의 시작
+    i_move = None
+    for s in runs_on_st:
+        if _has_quiet_before(E_on, s, quiet_n):
+            i_move = int(s)
+            break
+    if i_move is None:
+        i_move = runs_on_st[0] if len(runs_on_st) else (cycles[0][0] if len(cycles) else 0)
     t_move = float(t[i_move]) if len(t) else np.nan
 
-    # steady/last-steady: cycles 기반
+    # 6) steady/last-steady: 사이클 앵커
     if len(cycles) >= 3:
         g_amp = float(np.nanmax([np.nanmax(smoothed[s:e]) - np.nanmin(smoothed[s:e]) for s, e in cycles]))
-        i_steady, t_steady = _first_steady_from(t, smoothed, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+
+        i_steady, t_steady = _first_steady_from(
+            t, smoothed, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
+        )
         if i_steady is None:
             i_steady, t_steady = cycles[0][0], float(t[cycles[0][0]])
 
-        i_last, t_last = _last_steady_before_end(t, smoothed, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+        i_last, t_last = _last_steady_before_end(
+            t, smoothed, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
+        )
         if i_last is None:
             i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
 
-        # 움직임 종료: run_off의 마지막 끝
-        off_run    = (run_off >= adv['M']).astype(int)
-        off_edges  = np.diff(np.r_[0, off_run, 0])
-        off_starts = np.where(off_edges == 1)[0]
-        off_ends   = np.where(off_edges == -1)[0] - 1
-        m = np.where(off_starts >= i_last)[0]
-        if len(m):
-            j = m[-1]
-            i_end = int(off_ends[j])
-            t_end = float(t[min(i_end, len(t) - 1)])
-        else:
+        # 7) movement 종료(i_end): last-steady 이후 run_off 중 '조용구간이 뒤에 보장'되는 마지막 run의 끝
+        i_end = None
+        for s, e in zip(runs_off_st, runs_off_en):
+            if s >= i_last and _has_quiet_after(E_off, e, quiet_n):
+                i_end = int(e)
+        if i_end is None:
             i_end = cycles[-1][1]
-            t_end = float(t[i_end])
+        t_end = float(t[min(i_end, len(t) - 1)])
 
         VOnT  = float(t_steady - t_move) if (not np.isnan(t_steady) and not np.isnan(t_move)) else np.nan
         VOffT = float(t_end    - t_last) if (not np.isnan(t_end)    and not np.isnan(t_last)) else np.nan
     else:
         VOnT, VOffT = np.nan, np.nan
 
+    # 너무 작으면 0으로
     if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
     if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
+
 
     # ---- per-cycle detail (optional stub, empty for now) ----
     per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
@@ -337,3 +364,4 @@ summary, per_cycle, extras = analyze(df, adv)
 st.subheader("✅ 결과 요약")
 st.dataframe(summary, use_container_width=True)
 st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
+
