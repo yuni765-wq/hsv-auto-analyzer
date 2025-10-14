@@ -279,18 +279,18 @@ cnt = 0
             onset_index = i - cnt + 1
             break
 
-    cnt = 0
-    start_idx = onset_index if onset_index is not None else 0
+cnt = 0
+start_idx = onset_index if onset_index is not None else 0
     for i in range(start_idx, len(below)):
         cnt = cnt + 1 if below[i] else 0
         if cnt >= min_frames:
             offset_index = i - cnt + 1
             break
 
-    onset_time_s  = (onset_index / fps) if onset_index is not None else np.nan
-    offset_time_s = (offset_index / fps) if offset_index is not None else np.nan
+onset_time_s  = (onset_index / fps) if onset_index is not None else np.nan
+offset_time_s = (offset_index / fps) if offset_index is not None else np.nan
 
-    VOnT, VOffT = onset_time_s, offset_time_s
+VOnT, VOffT = onset_time_s, offset_time_s
 
     if VOnT is not None and VOnT < 1e-4:
         VOnT = 0.0
@@ -386,6 +386,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
