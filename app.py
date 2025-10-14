@@ -191,76 +191,78 @@ def analyze(df, adv):
     PS = _ps(left, right, t, cycles)
 
     # ---------- VOnT / VOffT ----------
-    diff = np.abs(np.diff(total, prepend=total[0]))
-    E = _moving_rms(diff, W)
+    # ---------- VOnT / VOffT (signal-guided with onset/offset) ----------
+    diff_total = np.abs(np.diff(total, prepend=total[0]))
+    E_total = _moving_rms(diff_total, W)
 
+    # onset/offset 열이 있으면 해당 신호 에너지 사용 (없으면 total로 fallback)
+    onset_series = df[onset_col].astype(float).values if onset_col else None
+    offset_series = df[offset_col].astype(float).values if offset_col else None
+
+    if onset_series is not None:
+        E_on = _moving_rms(np.abs(np.diff(onset_series, prepend=onset_series[0])), W)
+    else:
+        E_on = E_total
+
+    if offset_series is not None:
+        E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W)
+    else:
+        E_off = E_total
+
+    # 베이스라인/임계
     nB = max(int(round(adv['baseline_s'] * fps)), 5)
-    base = E[:min(nB, len(E))]
-    mu0 = float(np.mean(base)) if len(base) else 0.0
-    sigma0 = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
-    thr = mu0 + adv['k'] * sigma0
+    def _thr(E):
+        base = E[:min(nB, len(E))]
+        mu0 = float(np.mean(base)) if len(base) else 0.0
+        s0  = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
+        return mu0 + adv['k'] * s0
 
-    above = (E > thr).astype(int)
-    run = np.convolve(above, np.ones(adv['M'], dtype=int), mode="same")
-    idx_move = np.where(run >= adv['M'])[0]
+    thr_on  = _thr(E_on)
+    thr_off = _thr(E_off)
+
+    above_on  = (E_on  > thr_on ).astype(int)
+    above_off = (E_off > thr_off).astype(int)
+    run_on  = np.convolve(above_on,  np.ones(adv['M'], dtype=int), mode="same")
+    run_off = np.convolve(above_off, np.ones(adv['M'], dtype=int), mode="same")
+
+    # 움직임 시작: onset 기반(+ fallback)
+    idx_move = np.where(run_on >= adv['M'])[0]
     i_move = int(idx_move[0]) if len(idx_move) else None
 
     if len(cycles) >= 3:
+        # steady/last steady는 total 기반
         g_amp = float(np.nanmax([np.nanmax(total[s:e]) - np.nanmin(total[s:e]) for s, e in cycles]))
         if i_move is None:
-            i_move = cycles[0][0]
+            i_move = cycles[0][0]  # fallback
         t_move = float(t[i_move])
-        i_steady, t_steady = _first_steady_from(t, total, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+
+        i_steady, t_steady = _first_steady_from(
+            t, total, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
+        )
         if i_steady is None:
             i_steady, t_steady = cycles[0][0], float(t[cycles[0][0]])
-        i_last, t_last = _last_steady_before_end(t, total, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+
+        i_last, t_last = _last_steady_before_end(
+            t, total, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
+        )
         if i_last is None:
             i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
-        below = (E <= thr).astype(int)
-        runb = np.convolve(below, np.ones(adv['M'], dtype=int), mode="same")
-        cand = np.where((np.arange(len(E)) >= i_last) & (runb >= adv['M']))[0]
-        if len(cand):
-            i_end = int(cand[0]); t_end = float(t[i_end])
+
+        # 움직임 종료: offset 기반(+ fallback)
+        cand_end = np.where((np.arange(len(E_off)) >= i_last) & (run_off >= adv['M']))[0]
+        if len(cand_end):
+            i_end = int(cand_end[0]); t_end = float(t[i_end])
         else:
             i_end = cycles[-1][1]; t_end = float(t[i_end])
-        VOnT = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
-        VOffT = float(t_end - t_last) if (t_end is not None and t_last is not None) else np.nan
+
+        VOnT  = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
+        VOffT = float(t_end    - t_last) if (t_end    is not None and t_last is not None) else np.nan
     else:
         VOnT = np.nan; VOffT = np.nan
 
-    # Per-cycle detailed table
-    rows = []
-    for idx, (s, e) in enumerate(cycles):
-        period = float(t[e] - t[s]) if e > s else np.nan
-        amp = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
-        as_ratio = np.nan
-        ps_ratio = np.nan
-        if left is not None and right is not None and e > s:
-            L = float(np.nanmax(left[s:e]) - np.nanmin(left[s:e]))
-            R = float(np.nanmax(right[s:e]) - np.nanmin(right[s:e]))
-            as_ratio = (min(L, R) / max(L, R)) if max(L, R) > 0 else np.nan
-            li = s + int(np.nanargmax(left[s:e]))
-            ri = s + int(np.nanargmax(right[s:e]))
-            Ti = period
-            ps_ratio = abs(float(t[li] - t[ri])) / Ti if Ti and Ti > 0 else np.nan
-        rows.append(dict(cycle=idx + 1, start_time=float(t[s]), end_time=float(t[e]), period=period, amplitude=amp,
-                          AS_cycle=as_ratio, PS_cycle=ps_ratio))
-    per_cycle = pd.DataFrame(rows)
-
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "Amplitude Symmetry (AS)",
-            "Phase Symmetry (PS)",
-            "Voice Onset Time (VOnT, s)",
-            "Voice Offset Time (VOffT, s)",
-        ],
-        "Value": [AP, TP, AS, PS, VOnT, VOffT]
-    })
-
-    extras = dict(fps=fps, n_cycles=len(cycles))
-    return summary, per_cycle, extras
+    # 너무 작은 수치(≈0)는 0으로 정리(원하면 np.nan으로)
+    if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
+    if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
 
 # ---------------------- UI ----------------------
 
@@ -336,3 +338,4 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
