@@ -231,7 +231,7 @@ on_starts = np.where(on_edges == 1)[0]          # 각 런의 시작들
 i_move = int(on_starts[0]) if len(on_starts) else None
 
     # steady/last-steady는 total 기반
-    if len(cycles) >= 3:
+if len(cycles) >= 3:
         g_amp = float(np.nanmax([np.nanmax(total[s:e]) - np.nanmin(total[s:e]) for s, e in cycles]))
         if i_move is None:
             i_move = cycles[0][0]
@@ -381,6 +381,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
