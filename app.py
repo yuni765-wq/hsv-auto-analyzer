@@ -271,12 +271,14 @@ if VOffT is not None and VOffT < 1e-4:
     VOffT = 0.0
 
     # 너무 작은 값은 0으로 정리(원하면 np.nan으로 바꿔도 됨)
-if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
-if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
+if VOnT  is not None and VOnT  < 1e-4: 
+    VOnT  = 0.0
+if VOffT is not None and VOffT < 1e-4: 
+    VOffT = 0.0
 
     # ---- per-cycle detail table ----
-    rows = []
-    for idx, (s, e) in enumerate(cycles):
+rows = []
+for idx, (s, e) in enumerate(cycles):
         period = float(t[e] - t[s]) if e > s else np.nan
         amp    = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
         as_ratio = ps_ratio = np.nan
@@ -381,6 +383,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
