@@ -242,10 +242,10 @@ cycles = [(i, i+10) for i in range(0, max(0, len(smoothed)-10), 10)]
     # Onset / Offset detection (savgol_filter 기반)
     # ==========================================================
     
-    stable_start = int(len(smoothed) * 0.8)
-    stable_region = smoothed[stable_start:]
-    stable_mean = float(np.mean(stable_region)) if len(stable_region) else float(np.mean(smoothed))
-    amp_ref = float(np.percentile(np.abs(stable_region - stable_mean), 95)) if len(stable_region) else 0.0
+stable_start = int(len(smoothed) * 0.8)
+stable_region = smoothed[stable_start:]
+stable_mean = float(np.mean(stable_region)) if len(stable_region) else float(np.mean(smoothed))
+amp_ref = float(np.percentile(np.abs(stable_region - stable_mean), 95)) if len(stable_region) else 0.0
 
     th_on = amp_ref * 0.10
     th_off = amp_ref * 0.07
@@ -372,6 +372,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
