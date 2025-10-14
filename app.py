@@ -276,20 +276,25 @@ if VOnT  is not None and VOnT  < 1e-4:
 if VOffT is not None and VOffT < 1e-4: 
     VOffT = 0.0
 
- # ---- per-cycle detail table ----
+# ---- per-cycle detail table ----
 rows = []
 for idx, (s, e) in enumerate(cycles):
     period = float(t[e] - t[s]) if e > s else np.nan
-    amp    = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
-    as_ratio = ps_ratio = np.nan
-    if left is not None and right is not None and e > s:
+    amp    = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e])) if e > s else np.nan
+
+    as_ratio = np.nan
+    ps_ratio = np.nan
+
+    if (left is not None) and (right is not None) and (e > s):
         L = float(np.nanmax(left[s:e])  - np.nanmin(left[s:e]))
         R = float(np.nanmax(right[s:e]) - np.nanmin(right[s:e]))
         as_ratio = (min(L, R) / max(L, R)) if max(L, R) > 0 else np.nan
-        li = s + int(np.nanargmax(left[s:e]))
-        ri = s + int(np.nanargmax(right[s:e]))
+
+        li = s + int(np.nanargmax(left[s:e]))   if np.isfinite(np.nanmax(left[s:e]))  else s
+        ri = s + int(np.nanargmax(right[s:e]))  if np.isfinite(np.nanmax(right[s:e])) else s
         Ti = period
-        ps_ratio = abs(float(t[li] - t[ri])) / Ti if Ti and Ti > 0 else np.nan
+        ps_ratio = (abs(float(t[li] - t[ri])) / Ti) if (Ti and Ti > 0) else np.nan
+
     rows.append(dict(
         cycle=idx + 1,
         start_time=float(t[s]),
@@ -391,6 +396,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
