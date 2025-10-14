@@ -1,20 +1,38 @@
-# HSV Auto Analyzer - Version 2.1 (Refined Engine)
-# - Keeps AP/TP/AS/PS and adds VOnT/VOffT with robust cycle detection
-# - One-file input: time + (left/right or total) [+ optional onset/offset]
-# - Advanced settings (baseline length, thresholds) in an expander
+# HSV Auto Analyzer v2.2 (stable)
+# - Keeps AP/TP/AS/PS and robust VOnT/VOffT with smoothing + simple peak/cycle detection
+# - One-file input: time + (left/right or total)  [+optional onset/offset columns]
+# - Streamlit UI w/ safe defaults
 
-import streamlit as st
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+import streamlit as st
 
-st.set_page_config(page_title="HSV Auto Analyzer v2.1", layout="wide")
+# --------- Optional Savitzky–Golay (fallback to moving average if scipy not available)
+try:
+    from scipy.signal import savgol_filter
+except Exception:
+    def savgol_filter(x, window_length=11, polyorder=3, mode="interp"):
+        x = np.asarray(x, dtype=float)
+        w = int(window_length)
+        if w < 3:
+            return x.copy()
+        if w % 2 == 0:
+            w += 1
+        max_allowed = len(x) if len(x) % 2 == 1 else len(x) - 1
+        w = min(max(3, w), max_allowed)
+        if w < 3:
+            return x.copy()
+        pad = w // 2
+        xp = np.pad(x, (pad, pad), mode="edge")
+        ker = np.ones(w, dtype=float) / w
+        return np.convolve(xp, ker, mode="valid")
 
-st.title("🧠 HSV Auto Analyzer v2.1")
-st.caption("Amplitude/Time Periodicity, Amplitude/Phase Symmetry, Voice Onset/Offset Time – 정밀 계산 엔진")
+# ---------------- UI chrome ----------------
+st.set_page_config(page_title="HSV Auto Analyzer v2.2", layout="wide")
+st.title("🧠 HSV Auto Analyzer v2.2")
+st.caption("Amplitude/Time Periodicity, Amplitude/Phase Symmetry, Voice Onset/Offset Time – 안정 계산 엔진")
 
-# ---------------------- Utils ----------------------
-
+# ---------------- Utils ----------------
 def _norm_cols(cols):
     return [c.lower().strip().replace(" ", "_") for c in cols]
 
@@ -23,206 +41,151 @@ def load_table(file):
     if file.name.endswith(".csv"):
         df = pd.read_csv(file)
     else:
-        df = pd.read_excel(file, sheet_name=0)
+        df = pd.read_excel(file)
     df.columns = _norm_cols(df.columns)
     return df
 
-# Peak detection (simple and fast)
-def _detect_peaks(y):
-    y = np.asarray(y)
+def _moving_rms(diff, w):
+    y = np.asarray(diff, dtype=float)
+    if w <= 1:
+        return np.sqrt(np.maximum(y**2, 0.0))
+    pad = w // 2
+    yp = np.pad(y, (pad, pad), mode="edge")
+    ker = np.ones(w, dtype=float)
+    num = np.convolve(yp**2, ker, mode="valid")
+    return np.sqrt(num / float(w))
+
+def _detect_peaks(y, min_dist=3):
+    """simple local maxima detection."""
+    y = np.asarray(y, dtype=float)
     if len(y) < 3:
         return np.array([], dtype=int)
-    dy1 = y[1:-1] - y[:-2]
-    dy2 = y[1:-1] - y[2:]
-    idx = np.where((dy1 > 0) & (dy2 >= 0))[0] + 1
-    return idx
-
-# Moving RMS on |Δx|
-def _moving_rms(diff, w):
-    if w <= 1:
-        return np.sqrt(np.maximum(diff**2, 0))
-    pad = w // 2
-    xp = np.pad(diff, (pad, pad), mode="edge")
-    k = np.ones(w) / w
-    return np.sqrt(np.convolve(xp**2, k, mode="valid"))
-
-# Build cycles from peaks (closed phase bright → peaks on -total)
+    dy = np.diff(y)
+    peaks = np.where((np.r_[dy, 0] <= 0) & (np.r_[0, dy] > 0))[0]
+    if len(peaks) <= 1:
+        return peaks
+    # enforce minimum distance
+    keep = [peaks[0]]
+    for p in peaks[1:]:
+        if p - keep[-1] >= min_dist:
+            keep.append(p)
+        elif y[p] > y[keep[-1]]:
+            keep[-1] = p
+    return np.array(keep, dtype=int)
 
 def _build_cycles(t, total, min_frames=5):
-    peaks = _detect_peaks(-total)
-    cycles = []
+    """cycles as [(start_idx, end_idx)] using peaks on smoothed total"""
+    if len(total) < (min_frames * 3):
+        return []
+    # rough peaks -> cycle spans between successive peaks
+    peaks = _detect_peaks(total, min_dist=max(3, min_frames))
+    if len(peaks) < 3:
+        # fallback: fixed windows
+        step = max(min_frames * 2, 10)
+        spans = []
+        i = 0
+        while i + step < len(total):
+            spans.append((i, i + step))
+            i += step
+        return spans
+    spans = []
     for i in range(len(peaks) - 1):
-        s, e = int(peaks[i]), int(peaks[i + 1])
-        if (e - s) >= min_frames:
-            cycles.append((s, e))
-    return cycles
+        s = peaks[i]
+        e = peaks[i + 1]
+        if e - s >= min_frames:
+            spans.append((s, e))
+    return spans
 
-# Per-cycle metrics
-
-def _periods_amps(t, y, cycles):
-    periods, amps = [], []
+def _ap_tp(t, total, cycles):
+    """Return AP, TP and arrays"""
+    if len(cycles) < 2:
+        return np.nan, np.nan, [], []
+    periods = []
+    amps = []
     for s, e in cycles:
-        seg_t = t[s:e]
-        seg_y = y[s:e]
-        if len(seg_t) < 2:
+        if e <= s or e > len(t):
             continue
-        periods.append(float(seg_t[-1] - seg_t[0]))
-        amps.append(float(np.nanmax(seg_y) - np.nanmin(seg_y)))
-    return np.asarray(periods), np.asarray(amps)
-
-# AP / TP from adjacent cycles
-
-def _ap_tp(t, y, cycles):
-    periods, amps = _periods_amps(t, y, cycles)
-    ap, tp = [], []
-    for i in range(len(amps) - 1):
-        a, b = amps[i], amps[i + 1]
-        m = max(a, b)
-        ap.append(min(a, b) / m if m > 0 else np.nan)
-    for i in range(len(periods) - 1):
-        a, b = periods[i], periods[i + 1]
-        m = max(a, b)
-        tp.append(min(a, b) / m if m > 0 else np.nan)
-    return (np.nanmean(ap) if len(ap) else np.nan,
-            (np.nanmean(tp) if len(tp) else np.nan), periods, amps)
-
-# AS (amplitude symmetry) – range-based per cycle (left/right)
+        period = float(t[e] - t[s])
+        amp = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
+        if period > 0 and amp > 0:
+            periods.append(period)
+            amps.append(amp)
+    if len(periods) < 2 or len(amps) < 2:
+        return np.nan, np.nan, periods, amps
+    # periodicity (1 - CoV) clipped to [0,1]
+    cv_p = np.std(periods, ddof=1) / (np.mean(periods) + 1e-12)
+    cv_a = np.std(amps,    ddof=1) / (np.mean(amps)    + 1e-12)
+    TP = float(np.clip(1.0 - cv_p, 0.0, 1.0))
+    AP = float(np.clip(1.0 - cv_a, 0.0, 1.0))
+    return AP, TP, periods, amps
 
 def _as_range(left, right, cycles):
     if left is None or right is None or len(cycles) == 0:
         return np.nan
     ratios = []
     for s, e in cycles:
-        L = float(np.nanmax(left[s:e]) - np.nanmin(left[s:e]))
+        if e <= s: 
+            continue
+        L = float(np.nanmax(left[s:e])  - np.nanmin(left[s:e]))
         R = float(np.nanmax(right[s:e]) - np.nanmin(right[s:e]))
-        if max(L, R) > 0:
-            ratios.append(min(L, R) / max(L, R))
-    return np.nanmean(ratios) if ratios else np.nan
-
-# PS (phase symmetry) – |t_left(max) - t_right(max)| / T_i
+        mx = max(L, R)
+        if mx > 0:
+            ratios.append(min(L, R) / mx)
+    return float(np.nanmean(ratios)) if len(ratios) else np.nan
 
 def _ps(left, right, t, cycles):
     if left is None or right is None or len(cycles) == 0:
         return np.nan
-    vals = []
+    phs = []
     for s, e in cycles:
+        if e <= s:
+            continue
         li = s + int(np.nanargmax(left[s:e]))
         ri = s + int(np.nanargmax(right[s:e]))
-        Ti = float(t[e] - t[s]) if (e > s) else np.nan
-        if Ti and Ti > 0:
-            vals.append(abs(float(t[li] - t[ri])) / Ti)
-    return np.nanmean(vals) if vals else np.nan
+        Ti = float(t[e] - t[s])
+        if Ti > 0:
+            lag = abs(float(t[li] - t[ri])) / Ti   # 0..1
+            phs.append(max(0.0, 1.0 - lag))       # 1 == in-phase
+    return float(np.nanmean(phs)) if len(phs) else np.nan
 
-# Steady windows for VOnT/VOffT
-
-def _first_steady_from(t, y, cycles, g_amp, start_frame, K, ap_thr, tp_thr, amp_frac):
-    periods, amps = _periods_amps(t, y, cycles)
-    starts = np.array([s for s, _ in cycles], dtype=int)
-    for j in range(0, len(cycles) - K):
-        if starts[j] < start_frame:
+def _first_steady_from(t, total, cycles, g_amp, i_from, K=10, ap_thr=0.9, tp_thr=0.9, amp_frac=0.3):
+    """very simple steady finder: pick first cycle after i_from whose amp >= amp_frac*g_amp"""
+    for s, e in cycles:
+        if s < i_from:
             continue
-        subA = amps[j:j + K]
-        subP = periods[j:j + K]
-        ap_vals, tp_vals = [], []
-        for i in range(K - 1):
-            aa, bb = subA[i], subA[i + 1]; m = max(aa, bb); ap_vals.append(min(aa, bb) / m if m > 0 else np.nan)
-            aa, bb = subP[i], subP[i + 1]; m = max(aa, bb); tp_vals.append(min(aa, bb) / m if m > 0 else np.nan)
-        if (np.nanmin(ap_vals) >= ap_thr) and (np.nanmin(tp_vals) >= tp_thr) and (np.nanmin(subA) >= amp_frac * g_amp):
-            return starts[j], float(t[starts[j]])
+        amp = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
+        if amp >= amp_frac * g_amp:
+            return s, float(t[s])
     return None, None
 
-
-def _last_steady_before_end(t, y, cycles, g_amp, K, ap_thr, tp_thr, amp_frac):
-    periods, amps = _periods_amps(t, y, cycles)
-    ends = np.array([e for _, e in cycles], dtype=int)
-    for j_end in range(len(cycles), K - 1, -1):
-        j = j_end - K
-        subA = amps[j:j + K]
-        subP = periods[j:j + K]
-        ap_vals, tp_vals = [], []
-        for i in range(K - 1):
-            aa, bb = subA[i], subA[i + 1]; m = max(aa, bb); ap_vals.append(min(aa, bb) / m if m > 0 else np.nan)
-            aa, bb = subP[i], subP[i + 1]; m = max(aa, bb); tp_vals.append(min(aa, bb) / m if m > 0 else np.nan)
-        if (np.nanmin(ap_vals) >= ap_thr) and (np.nanmin(tp_vals) >= tp_thr) and (np.nanmin(subA) >= amp_frac * g_amp):
-            return ends[j + K - 1], float(t[ends[j + K - 1]])
+def _last_steady_before_end(t, total, cycles, g_amp, K=10, ap_thr=0.9, tp_thr=0.9, amp_frac=0.3):
+    """last cycle whose amp >= amp_frac*g_amp"""
+    for s, e in reversed(cycles):
+        amp = float(np.nanmax(total[s:e]) - np.nanmin(total[s:e]))
+        if amp >= amp_frac * g_amp:
+            return e, float(t[e])
     return None, None
 
-import pandas as pd
-import numpy as np
-# Savitzky–Golay (scipy 없으면 이동평균으로 대체)
-try:
-    from scipy.signal import savgol_filter
-except Exception:
-    import numpy as np
-    def savgol_filter(x, window_length=11, polyorder=3, mode="interp"):
-        w = int(window_length)
-        if w < 3: 
-            return np.asarray(x, dtype=float)
-        if w % 2 == 0:
-            w += 1
-        max_allowed = len(x) if len(x) % 2 == 1 else len(x) - 1
-        w = min(max(3, w), max_allowed)
-        pad = w // 2
-        xp = np.pad(np.asarray(x, dtype=float), (pad, pad), mode="edge")
-        ker = np.ones(w, dtype=float) / w
-        return np.convolve(xp, ker, mode="valid")
-import streamlit as st
-
-# ---- optional savgol_filter (fallback to moving average) ----
-try:
-    from scipy.signal import savgol_filter  # 사용 가능하면 그대로 사용
-    HAS_SCIPY = True
-except Exception:
-    HAS_SCIPY = False
-    def savgol_filter(x, window_length=11, polyorder=3, mode="interp"):
-        """scipy가 없을 때 간단한 이동평균으로 대체"""
-        w = int(window_length)
-        if w < 1:
-            return np.asarray(x, dtype=float)
-        if w % 2 == 0:              # 홀수 보장
-            w += 1
-        w = min(w, len(x) if len(x) % 2 == 1 else len(x)-1)
-        if w < 3:
-            return np.asarray(x, dtype=float)
-        pad = w // 2
-        xp = np.pad(np.asarray(x, dtype=float), (pad, pad), mode="edge")
-        kernel = np.ones(w, dtype=float) / w
-        return np.convolve(xp, kernel, mode="valid")
-        
-# ----------------- Utils -----------------
-def _norm_cols(cols):
-    return [c.lower().strip().replace(" ", "_") for c in cols]
-
-@st.cache_data
-def load_table(file):
-    """엑셀 또는 CSV 파일을 자동으로 판별하여 불러옵니다."""
-    if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
-    else:
-        df = pd.read_excel(file)
-    return df
-
-# Moving RMS, detect_peaks 등 기존 함수들 계속 아래에 있음
-def _moving_rms(diff, w):
-    ...
-
-# ==========================================================
-# Main Analyzer
-# ==========================================================
-
+# ================================
+# Main analyzer
+# ================================
 def analyze(df, adv):
     # ---- column mapping ----
     cols = df.columns.tolist()
-    time_col   = next((c for c in cols if 'time'  in c.lower()), None)
-    left_col   = next((c for c in cols if 'left'  in c.lower()), None)
-    right_col  = next((c for c in cols if 'right' in c.lower()), None)
-    total_col  = next((c for c in cols if 'total' in c.lower()), None)
+    time_col   = next((c for c in cols if 'time'  in c), None)
+    left_col   = next((c for c in cols if 'left'  in c), None)
+    right_col  = next((c for c in cols if 'right' in c), None)
+    total_col  = next((c for c in cols if 'total' in c), None)
+    onset_col  = next((c for c in cols if 'onset' in c), None)
+    offset_col = next((c for c in cols if 'offset'in c), None)
 
     if time_col is None:
-        return pd.DataFrame({"Parameter": [], "Value": []}), pd.DataFrame(), dict(fps=np.nan, n_cycles=0)
+        empty = pd.DataFrame()
+        return (pd.DataFrame({"Parameter": [], "Value": []}), empty, dict(fps=np.nan, n_cycles=0))
 
+    # ---- signals ----
     t = df[time_col].astype(float).values
-    if t.max() > 10:
+    if t.max() > 10:  # ms → s
         t = t / 1000.0
 
     if total_col:
@@ -230,75 +193,104 @@ def analyze(df, adv):
     elif left_col and right_col:
         total = (df[left_col].astype(float).values + df[right_col].astype(float).values) / 2.0
     else:
-        return pd.DataFrame({"Parameter": [], "Value": []}), pd.DataFrame(), dict(fps=np.nan, n_cycles=0)
+        empty = pd.DataFrame()
+        return (pd.DataFrame({"Parameter": [], "Value": []}), empty, dict(fps=np.nan, n_cycles=0))
 
- # ---- FPS ----
-dt  = np.median(np.diff(t)) if len(t) > 1 else 0.0
-fps = 1.0 / dt if dt > 0 else 1500.0
+    left  = df[left_col].astype(float).values  if left_col  else None
+    right = df[right_col].astype(float).values if right_col else None
 
-# ---- smoothing (Savitzky–Golay / fallback) ----
-signal = np.asarray(total, dtype=float)
+    # ---- FPS ----
+    dt  = np.median(np.diff(t)) if len(t) > 1 else 0.0
+    fps = 1.0 / dt if dt > 0 else 1500.0
 
-# 창 길이 자동 결정 (≈7ms, 7~21, 항상 홀수, 길이 안전)
-base_w  = int(max(7, min(21, round(fps * 0.007))))
-win_len = base_w if base_w % 2 == 1 else base_w + 1
-if len(signal) <= 3:
-    win_len = 3
-else:
-    max_allowed = len(signal) if len(signal) % 2 == 1 else len(signal) - 1
-    win_len = min(max(3, win_len), max_allowed)
+    # ---- smoothing for robust cycles ----
+    signal = np.asarray(total, dtype=float)
+    base_w  = int(max(7, min(21, round(fps * 0.007))))  # ≈7ms
+    win_len = base_w if base_w % 2 == 1 else base_w + 1
+    if len(signal) <= 3:
+        win_len = 3
+    else:
+        max_allowed = len(signal) if len(signal) % 2 == 1 else len(signal) - 1
+        win_len = min(max(3, win_len), max_allowed)
+    smoothed = savgol_filter(signal, window_length=win_len, polyorder=3, mode="interp")
 
-smoothed = savgol_filter(signal, window_length=win_len, polyorder=3, mode="interp")
+    # ---- cycles ----
+    min_frames = max(int(0.002 * fps), 5)
+    cycles = _build_cycles(t, smoothed, min_frames=min_frames)
 
-# ---- Dummy cycles (임시 cycle 검출) ----
-cycles = [(i, i+10) for i in range(0, max(0, len(smoothed) - 10), 10)]
+    # ---- AP/TP/AS/PS ----
+    AP, TP, periods, amps = _ap_tp(t, smoothed, cycles)
+    AS = _as_range(left, right, cycles)
+    PS = _ps(left, right, t, cycles)
 
-    # ==========================================================
-    # Onset / Offset detection (savgol_filter 기반)
-    # ==========================================================
-    
-stable_start = int(len(smoothed) * 0.8)
-stable_region = smoothed[stable_start:]
-stable_mean = float(np.mean(stable_region)) if len(stable_region) else float(np.mean(smoothed))
-amp_ref = float(np.percentile(np.abs(stable_region - stable_mean), 95)) if len(stable_region) else 0.0
+    # ---------- VOnT / VOffT ----------
+    # energy from changes
+    diff_total = np.abs(np.diff(smoothed, prepend=smoothed[0]))
+    W = max(int(round((adv['W_ms'] / 1000.0) * fps)), 3)
+    E_total = _moving_rms(diff_total, W)
 
-th_on = amp_ref * 0.10
-th_off = amp_ref * 0.07
-centered = smoothed - stable_mean
-amp = np.abs(centered)
-min_frames = max(1, int((10.0 / 1000.0) * fps))
+    onset_series  = df[onset_col].astype(float).values  if onset_col  else None
+    offset_series = df[offset_col].astype(float).values if offset_col else None
 
-above = amp > th_on
-below = amp < th_off
-onset_index = offset_index = None
-cnt = 0
-    for i in range(len(above)):
-        cnt = cnt + 1 if above[i] else 0
-        if cnt >= min_frames:
-            onset_index = i - cnt + 1
-            break
+    E_on  = _moving_rms(np.abs(np.diff(onset_series,  prepend=onset_series[0])),  W) if onset_series  is not None else E_total
+    E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W) if offset_series is not None else E_total
 
-    cnt = 0
-    start_idx = onset_index if onset_index is not None else 0
-    for i in range(start_idx, len(below)):
-        cnt = cnt + 1 if below[i] else 0
-        if cnt >= min_frames:
-            offset_index = i - cnt + 1
-            break
+    nB = max(int(round(adv['baseline_s'] * fps)), 5)
+    def _thr(E):
+        base = E[:min(nB, len(E))]
+        mu0  = float(np.mean(base)) if len(base) else 0.0
+        s0   = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
+        return mu0 + adv['k'] * s0
 
-onset_time_s  = (onset_index / fps) if onset_index is not None else np.nan
-offset_time_s = (offset_index / fps) if offset_index is not None else np.nan
+    thr_on, thr_off = _thr(E_on), _thr(E_off)
+    above_on, above_off = (E_on > thr_on).astype(int), (E_off > thr_off).astype(int)
+    run_on  = np.convolve(above_on,  np.ones(adv['M'], dtype=int), mode="same")
+    run_off = np.convolve(above_off, np.ones(adv['M'], dtype=int), mode="same")
 
-VOnT, VOffT = onset_time_s, offset_time_s
+    # 움직임 시작: run_on 활성구간 첫 시작
+    on_run    = (run_on >= adv['M']).astype(int)
+    on_edges  = np.diff(np.r_[0, on_run, 0])
+    on_starts = np.where(on_edges == 1)[0]
+    i_move = int(on_starts[0]) if len(on_starts) else (cycles[0][0] if len(cycles) else 0)
+    t_move = float(t[i_move]) if len(t) else np.nan
 
-    if VOnT is not None and VOnT < 1e-4:
-        VOnT = 0.0
-    if VOffT is not None and VOffT < 1e-4:
-        VOffT = 0.0
+    # steady/last-steady: cycles 기반
+    if len(cycles) >= 3:
+        g_amp = float(np.nanmax([np.nanmax(smoothed[s:e]) - np.nanmin(smoothed[s:e]) for s, e in cycles]))
+        i_steady, t_steady = _first_steady_from(t, smoothed, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+        if i_steady is None:
+            i_steady, t_steady = cycles[0][0], float(t[cycles[0][0]])
 
-    # ==========================================================
-    # Summary
-    # ==========================================================
+        i_last, t_last = _last_steady_before_end(t, smoothed, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac'])
+        if i_last is None:
+            i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
+
+        # 움직임 종료: run_off의 마지막 끝
+        off_run    = (run_off >= adv['M']).astype(int)
+        off_edges  = np.diff(np.r_[0, off_run, 0])
+        off_starts = np.where(off_edges == 1)[0]
+        off_ends   = np.where(off_edges == -1)[0] - 1
+        m = np.where(off_starts >= i_last)[0]
+        if len(m):
+            j = m[-1]
+            i_end = int(off_ends[j])
+            t_end = float(t[min(i_end, len(t) - 1)])
+        else:
+            i_end = cycles[-1][1]
+            t_end = float(t[i_end])
+
+        VOnT  = float(t_steady - t_move) if (not np.isnan(t_steady) and not np.isnan(t_move)) else np.nan
+        VOffT = float(t_end    - t_last) if (not np.isnan(t_end)    and not np.isnan(t_last)) else np.nan
+    else:
+        VOnT, VOffT = np.nan, np.nan
+
+    if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
+    if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
+
+    # ---- per-cycle detail (optional stub, empty for now) ----
+    per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
+
+    # ---- summary & extras ----
     summary = pd.DataFrame({
         "Parameter": [
             "Amplitude Periodicity (AP)",
@@ -306,113 +298,42 @@ VOnT, VOffT = onset_time_s, offset_time_s
             "Amplitude Symmetry (AS)",
             "Phase Symmetry (PS)",
             "Voice Onset Time (VOnT, s)",
-            "Voice Offset Time (VOffT, s)"
+            "Voice Offset Time (VOffT, s)",
         ],
-        "Value": [0.97, 0.98, 0.73, 0.009, VOnT, VOffT]
+        "Value": [AP, TP, AS, PS, VOnT, VOffT]
     })
-    per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
+
     extras = dict(fps=fps, n_cycles=len(cycles))
     return summary, per_cycle, extras
 
-# ==========================================================
-# ---------------------- UI ----------------------
-
+# ================================
+# Streamlit UI
+# ================================
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
 
 with st.expander("⚙️ 고급 설정 (기본값 그대로 사용해도 충분)", expanded=False):
     c1, c2, c3, c4, c5 = st.columns(5)
     baseline_s = c1.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.15, step=0.01)
-    k = c2.number_input("임계 배수 k", min_value=1.0, max_value=6.0, value=3.0, step=0.1)
-    M = int(c3.number_input("연속 프레임 M", min_value=1, max_value=20, value=5, step=1))
-    K = int(c4.number_input("정상 연속 사이클 K", min_value=1, max_value=10, value=3, step=1))
-    W_ms = c5.number_input("에너지 창(ms)", min_value=2.0, max_value=40.0, value=10.0, step=1.0)
-
+    k          = c2.number_input("임계 배수 k",     min_value=1.0,  max_value=6.0,  value=3.0,  step=0.1)
+    M          = c3.number_input("연속 프레임 M",   min_value=1,    max_value=20,   value=5,    step=1)
+    ap_thr     = c4.slider("AP 임계값", 0.70, 1.00, 0.90, 0.01)
+    tp_thr     = c5.slider("TP 임계값", 0.70, 1.00, 0.95, 0.01)
     c6, c7, c8 = st.columns(3)
-    ap_thr = c6.slider("AP 임계", 0.70, 1.00, 0.90, 0.01)
-    tp_thr = c7.slider("TP 임계", 0.70, 1.00, 0.95, 0.01)
-    amp_frac = c8.slider("정상 최소 진폭 (max의 비율)", 0.10, 0.80, 0.30, 0.01)
+    amp_frac   = c6.slider("정상 최소 진폭(백분율)", 0.10, 0.80, 0.30, 0.01)
+    W_ms       = c7.slider("에너지 창(ms)", 2.0, 40.0, 10.0, 1.0)
 
 adv = dict(
-    baseline_s=baseline_s, k=k, M=M, K=K,
+    baseline_s=baseline_s, k=k, M=M, K=10,
     W_ms=W_ms, ap_thr=ap_thr, tp_thr=tp_thr, amp_frac=amp_frac
 )
 
-if uploaded:
-    df = load_table(uploaded)
-    st.subheader("📋 데이터 미리보기")
-    st.dataframe(df.head(), use_container_width=True)
+if uploaded is None:
+    st.info("분석할 파일을 업로드해 주세요.")
+    st.stop()
 
-    try:
-        summary, per_cycle, extras = analyze(df, adv)
-    except Exception as e:
-        st.exception(e)
-        st.stop()
+df = load_table(uploaded)
+summary, per_cycle, extras = analyze(df, adv)
 
-    st.subheader("✅ 결과 요약")
-    st.dataframe(summary, use_container_width=True)
-
-    st.info(f"FPS 추정값: {extras['fps']:.1f} | 탐지된 사이클 수: {extras['n_cycles']}")
-
-    # Downloads
-    c1, c2 = st.columns(2)
-    c1.download_button("💾 요약 CSV 다운로드", data=summary.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="HSV_summary_v2_1.csv", mime="text/csv")
-    c2.download_button("📦 사이클별 CSV 다운로드", data=per_cycle.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="HSV_cycles_v2_1.csv", mime="text/csv")
-
-    # Lightweight plot (v3에서 고급 시각화 예정)
-    st.subheader("📈 Total Gray (개략) – 고급 시각화는 v3에서 제공")
-    time_col = next((c for c in df.columns if 'time' in c), None)
-    total_col = next((c for c in df.columns if 'total' in c), None)
-    left_col = next((c for c in df.columns if 'left' in c), None)
-    right_col = next((c for c in df.columns if 'right' in c), None)
-
-    t = df[time_col].astype(float).values
-    if t.max() > 10:
-        t = t / 1000.0
-    if total_col:
-        total = df[total_col].astype(float).values
-    elif left_col and right_col:
-        total = (df[left_col].astype(float).values + df[right_col].astype(float).values) / 2.0
-    else:
-        total = None
-
-    if total is not None:
-        fig, ax = plt.subplots(figsize=(9, 3))
-        ax.plot(t, total)
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Total gray value")
-        st.pyplot(fig)
-else:
-    st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+st.subheader("✅ 결과 요약")
+st.dataframe(summary, use_container_width=True)
+st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
