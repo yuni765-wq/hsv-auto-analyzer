@@ -241,10 +241,7 @@ smoothed = savgol_filter(signal, window_length=win_len, polyorder=3, mode="inter
     # ==========================================================
     # Onset / Offset detection (savgol_filter 기반)
     # ==========================================================
-    signal = total.astype(float)
-    win_len = 11 if len(signal) >= 11 else 7
-    smoothed = savgol_filter(signal, window_length=win_len, polyorder=3, mode="interp")
-
+    
     stable_start = int(len(smoothed) * 0.8)
     stable_region = smoothed[stable_start:]
     stable_mean = float(np.mean(stable_region)) if len(stable_region) else float(np.mean(smoothed))
@@ -375,6 +372,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
