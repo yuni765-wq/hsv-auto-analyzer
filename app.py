@@ -321,7 +321,7 @@ summary = pd.DataFrame({
 })
 
 extras = dict(fps=fps, n_cycles=len(cycles))
-return summary, per_cycle, extras
+    return summary, per_cycle, extras
 # ---------------------- UI ----------------------
 
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
@@ -396,6 +396,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
