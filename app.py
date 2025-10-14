@@ -224,8 +224,11 @@ def analyze(df, adv):
     run_off = np.convolve(above_off, np.ones(adv['M'], dtype=int), mode="same")
 
     # 움직임 시작: onset 기반(+fallback)
-    idx_move = np.where(run_on >= adv['M'])[0]
-    i_move   = int(idx_move[0]) if len(idx_move) else None
+# 연속 M프레임 이상 활성 구간(run)의 '시작' 인덱스 잡기
+on_run   = (run_on >= adv['M']).astype(int)
+on_edges = np.diff(np.r_[0, on_run, 0])
+on_starts = np.where(on_edges == 1)[0]          # 각 런의 시작들
+i_move = int(on_starts[0]) if len(on_starts) else None
 
     # steady/last-steady는 total 기반
     if len(cycles) >= 3:
@@ -247,11 +250,20 @@ def analyze(df, adv):
             i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
 
         # 움직임 종료: offset 기반(+fallback)
-        cand_end = np.where((np.arange(len(E_off)) >= i_last) & (run_off >= adv['M']))[0]
-        if len(cand_end):
-            i_end = int(cand_end[0]); t_end = float(t[i_end])
-        else:
-            i_end = cycles[-1][1];      t_end = float(t[i_end])
+       # i_last 이후 시작한 활성(run) 중 '마지막' 런의 '끝' 인덱스 사용
+off_run   = (run_off >= adv['M']).astype(int)
+off_edges = np.diff(np.r_[0, off_run, 0])
+off_starts = np.where(off_edges == 1)[0]
+off_ends   = np.where(off_edges == -1)[0] - 1   # 각 런의 종료 인덱스
+
+m = np.where(off_starts >= i_last)[0]
+if len(m):
+    j = m[-1]                                   # 마지막 런
+    i_end = int(off_ends[j])
+    t_end = float(t[min(i_end, len(t)-1)])
+else:
+    i_end = cycles[-1][1]
+    t_end = float(t[i_end])
 
         VOnT  = float(t_steady - t_move) if (t_steady is not None and t_move is not None) else np.nan
         VOffT = float(t_end    - t_last) if (t_end    is not None and t_last is not None) else np.nan
@@ -369,5 +381,6 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
