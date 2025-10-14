@@ -308,7 +308,7 @@ for idx, (s, e) in enumerate(cycles):
 per_cycle = pd.DataFrame(rows)
 
     # ---- summary & extras ----
-  summary = pd.DataFrame({
+summary = pd.DataFrame({
     "Parameter": [
         "Amplitude Periodicity (AP)",
         "Time Periodicity (TP)",
@@ -396,6 +396,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
