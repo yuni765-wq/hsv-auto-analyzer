@@ -272,7 +272,7 @@ above = amp > th_on
 below = amp < th_off
 onset_index = offset_index = None
 
-    cnt = 0
+cnt = 0
     for i in range(len(above)):
         cnt = cnt + 1 if above[i] else 0
         if cnt >= min_frames:
@@ -386,6 +386,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
