@@ -236,7 +236,7 @@ if win_len < 3:
 smoothed = savgol_filter(signal, window_length=win_len, polyorder=3, mode="interp")
 
     # ---- Dummy cycles (임시 cycle 검출 대체) ----
-    cycles = [(i, i+10) for i in range(0, max(0, len(smoothed)-10), 10)]
+cycles = [(i, i+10) for i in range(0, max(0, len(smoothed)-10), 10)]
 
     # ==========================================================
     # Onset / Offset detection (savgol_filter 기반)
@@ -372,6 +372,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
