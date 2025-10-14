@@ -262,11 +262,11 @@ stable_region = smoothed[stable_start:]
 stable_mean = float(np.mean(stable_region)) if len(stable_region) else float(np.mean(smoothed))
 amp_ref = float(np.percentile(np.abs(stable_region - stable_mean), 95)) if len(stable_region) else 0.0
 
-    th_on = amp_ref * 0.10
-    th_off = amp_ref * 0.07
-    centered = smoothed - stable_mean
-    amp = np.abs(centered)
-    min_frames = max(1, int((10.0 / 1000.0) * fps))
+th_on = amp_ref * 0.10
+th_off = amp_ref * 0.07
+centered = smoothed - stable_mean
+amp = np.abs(centered)
+min_frames = max(1, int((10.0 / 1000.0) * fps))
 
     above = amp > th_on
     below = amp < th_off
@@ -386,6 +386,7 @@ if uploaded:
         st.pyplot(fig)
 else:
     st.info("분석할 파일을 업로드하면 자동으로 계산됩니다.")
+
 
 
 
