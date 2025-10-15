@@ -364,7 +364,7 @@ summary = pd.DataFrame({
 })
 
 extras = dict(fps=fps, n_cycles=len(cycles))
-    return summary, per_cycle, extras
+return summary, per_cycle, extras
 
 # ================================
 # Streamlit UI
@@ -397,6 +397,7 @@ summary, per_cycle, extras = analyze(df, adv)
 st.subheader("✅ 결과 요약")
 st.dataframe(summary, use_container_width=True)
 st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
+
 
 
 
