@@ -188,7 +188,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     diff_total = np.abs(np.diff(total_s, prepend=total_s[0]))
     W = max(int(round((adv.get("W_ms", 10.0) / 1000.0) * fps)), 3)
     E_total = _moving_rms(diff_total, W)
-
+    st.line_chart(E_total)
     onset_series  = df[onset_col].astype(float).values if onset_col else None
     offset_series = df[offset_col].astype(float).values if offset_col else None
 
@@ -367,7 +367,13 @@ def analyze(df: pd.DataFrame, adv: dict):
                   (VOffT * 1000.0 if VOffT is not None and not np.isnan(VOffT) else np.nan)]
     })
     extras = dict(fps=fps, n_cycles=len(cycles))
+    # ---- NaN 방어: 값이 None이거나 NaN이면 0으로 스냅 ----
+if VOnT is None or np.isnan(VOnT):
+    VOnT = 0.0
+if VOffT is None or np.isnan(VOffT):
+    VOffT = 0.0
     return summary, per_cycle, extras
+st.write(f"DEBUG ▶ FPS: {fps:.2f}, Cycles: {len(cycles)}, VOnT_raw: {VOnT}, VOffT_raw: {VOffT}")
 
 # ---------------------------- UI ---------------------------------------
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
@@ -419,3 +425,4 @@ if uploaded is not None:
     st.write(f"FPS: {extras.get('fps', np.nan):.1f}, 검출된 사이클 수: {extras.get('n_cycles', 0)}")
 else:
     st.info("샘플 파일(시간 + 좌/우 또는 total, 선택적으로 onset/offset 컬럼)을 업로드해 주세요.")
+
