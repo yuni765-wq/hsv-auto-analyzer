@@ -392,7 +392,7 @@ with st.expander("⚙ 고급 설정 (기본값 그대로 사용해도 충분)", 
     c1, c2, c3, c4, c5 = st.columns(5)
     baseline_s = c1.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.15, step=0.01)
     k = c2.number_input("임계 배수 k", min_value=1.0, max_value=6.0, value=2.2, step=0.1)
-    M = c3.number_input("연속 프레임 M", min_value=1, max_value=5, value=12, step=1)
+    M = c3.number_input("연속 프레임 M", min_value=1, max_value=20, value=12, step=1)
     W_ms = c4.number_input("에너지 창(ms)", min_value=2.0, max_value=40.0, value=10.0, step=1.0)
     amp_frac = c5.slider("정상화 최소 진폭 (max에 대한 비율)", 0.10, 0.80, 0.35, 0.01)
 
@@ -427,6 +427,7 @@ if uploaded is not None:
 
 else:
     st.info("샘플 파일(시간 + 좌/우 또는 total, 선택적으로 onset/offset 컬럼)을 업로드해 주세요.")
+
 
 
 
