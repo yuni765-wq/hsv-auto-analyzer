@@ -1,10 +1,10 @@
-# app_v2.3.4.py
-# HSV Auto Analyzer – onset-stabilized + debug (hysteresis + debounce + steady gating)
-# - DEBUG: FPS / Cycles / VOnT_raw / VOffT_raw 출력
-# - NaN 방어: None/NaN → 0.0 ms 로 스냅(표시 및 계산 안정)
-# - Quick check: E_total/E_on/E_off 차트(체크박스)로 바로 신호 확인
-# - 기본값(권장): baseline 0.18s, k 2.3, hysteresis_ratio 0.78, amp_frac 0.65,
-#                min_duration_ms 35, refractory_ms 30
+# app_v2.3.5.py
+# HSV Auto Analyzer – v2 FINAL (onset-stabilized + robust fallbacks + debug)
+# - Hysteresis + Debounce + Steady gating
+# - Robust E_on source selection (+ optional "force total")
+# - Strong guarantees: non-zero VOnT/VOffT via last-resort fallbacks
+# - Rich DEBUG line: thresholds & key indices
+# - Quick charts toggle for visual checks
 
 import numpy as np
 import pandas as pd
@@ -18,9 +18,9 @@ except Exception:
 import streamlit as st
 
 # --------------------------- UI / PAGE ---------------------------------
-st.set_page_config(page_title="HSV Auto Analyzer v2.3.4", layout="wide")
-st.title("HSV Auto Analyzer v2.3.4")
-st.caption("AP/TP/AS/PS + Voice On/Off (히스테리시스/디바운스/steady 게이팅 + 디버그)")
+st.set_page_config(page_title="HSV Auto Analyzer v2.3.5", layout="wide")
+st.title("HSV Auto Analyzer v2.3.5 – FINAL (v2)")
+st.caption("AP/TP/AS/PS + Voice On/Off (히스테리시스/디바운스/steady 게이팅 + 강건한 Fallback + 디버그)")
 
 # --------------------------- Utils -------------------------------------
 def _norm_cols(cols):
@@ -129,7 +129,7 @@ def _ps(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> flo
     return _clamp01(1.0 - _nanmean0(diffs))
 
 # ------------------------ Main analyzer ---------------------------------
-def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False):
+def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False, force_total_for_onset: bool = False):
     # ---- column mapping ----
     cols = _norm_cols(df.columns.tolist()); df.columns = cols
     def pick(name):
@@ -185,14 +185,18 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False):
     onset_series  = df[onset_col].astype(float).values if onset_col else None
     offset_series = df[offset_col].astype(float).values if offset_col else None
 
-    # --- Robust E_on 선택 (평탄/희소 onset 열이면 total 사용)
-    if onset_series is not None:
-        E_on_candidate = _moving_rms(np.abs(np.diff(onset_series, prepend=onset_series[0])), W)
-        good = (np.nanstd(E_on_candidate) > 1e-6) and \
-               (np.count_nonzero(E_on_candidate > np.nanmean(E_on_candidate)) > 5)
-        E_on = E_on_candidate if good else E_total
-    else:
+    # --- Robust E_on 선택 (패치 A) ---
+    if force_total_for_onset:
         E_on = E_total
+    else:
+        if onset_series is not None:
+            E_on_candidate = _moving_rms(np.abs(np.diff(onset_series, prepend=onset_series[0])), W)
+            good = (np.nanstd(E_on_candidate) > 1e-6) and \
+                   (np.count_nonzero(E_on_candidate > np.nanmean(E_on_candidate)) > 5)
+            E_on = E_on_candidate if good else E_total
+        else:
+            E_on = E_total
+
     E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W) if offset_series is not None else E_total
 
     # Quick charts (옵션)
@@ -258,9 +262,9 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False):
                     i_move = onset_idx
                     break
 
-    # ---- steady / last steady ----
+    # ---- steady / last steady (패치 2: move 이후만) ----
     VOnT = np.nan; VOffT = np.nan
-    i_steady = None; i_last = None
+    i_steady = None; i_last = None; i_end = None
     if len(cycles) >= 3 and i_move is not None:
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles]))
         t_move = float(t[i_move])
@@ -285,29 +289,36 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False):
                 return max(0.0, min(1.0, 1.0 - (sd / m))) if m > 0 else 0.0
             return (_p(amps), _p(periods))
 
+        # --- i_steady: 반드시 i_move 이후 시작점으로 선택 ---
         for (s, e) in cycles:
-            if s < i_move: continue
+            if s <= i_move:  # move 이전 구간 무시
+                continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp > 0 and amp >= amp_frac * g_amp:
                 AP_loc, TP_loc = _local_periodicity(s, e)
                 if AP_loc >= ap_thr and TP_loc >= tp_thr:
-                    i_steady = int(s); break
-        if i_steady is None: i_steady = cycles[0][0]
+                    i_steady = int(s)
+                    break
 
-        # steady가 move와 같거나 앞서면 다음 사이클로 미룸
-        if i_steady <= i_move:
+        # fallback: i_move 이후 첫 사이클 시작
+        if i_steady is None:
             for (s, e) in cycles:
                 if s > i_move:
-                    i_steady = s; break
+                    i_steady = int(s); break
 
+        # 최후: 1프레임 뒤
+        if i_steady is None:
+            i_steady = min(i_move + 1, len(t) - 1)
+
+        # 마지막 steady 시작점
         for (s, e) in reversed(cycles):
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp > 0 and amp >= amp_frac * g_amp:
                 i_last = int(s); break
-        if i_last is None: i_last = cycles[-1][1]
+        if i_last is None:
+            i_last = cycles[-1][1]
 
         # ---- offset: 상태기계 (마지막 종료지점 선택) ----
-        i_end = None
         in_voiced = False
         seg_start = None
         start_i = max(0, int(i_last))
@@ -331,22 +342,69 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False):
             m = np.where(off_starts >= i_last)[0]
             i_end = int(off_ends[m[-1]]) if len(m) else int(cycles[-1][1])
 
-        t_steady = float(t[i_steady])
-        t_last   = float(t[i_last])
-        t_end    = float(t[min(i_end, len(t) - 1)])
+        # 시간변환
+        t_steady = float(t[i_steady]); t_last = float(t[i_last])
+        t_end = float(t[min(i_end, len(t) - 1)])
 
         VOnT  = float(t_steady - t_move)
         VOffT = float(t_end - t_last)
 
-    # ---- NaN 방어: None/NaN → 0.0 ----
-    if (VOnT is None) or (isinstance(VOnT, float) and np.isnan(VOnT)):
-        VOnT = 0.0
-    if (VOffT is None) or (isinstance(VOffT, float) and np.isnan(VOffT)):
-        VOffT = 0.0
+    # ---- LAST-RESORT FALLBACKS (패치 3) ----
+    def _first_cross_after(E, thr, start, min_len):
+        run = 0
+        for i in range(start, len(E)):
+            if E[i] > thr:
+                run += 1
+                if run >= min_len:
+                    return i - (min_len - 1)
+            else:
+                run = 0
+        return None
 
-    # ---- DEBUG 로그 ----
-    st.write(f"DEBUG ▶ FPS: {fps:.2f}, Cycles: {len(cycles)}, "
-             f"VOnT_raw(ms): {VOnT*1000:.2f}, VOffT_raw(ms): {VOffT*1000:.2f}")
+    if (np.isnan(VOnT) if isinstance(VOnT, float) else (VOnT is None)) or (i_move is None or i_steady is None):
+        i0 = _first_cross_after(E_on, thr_on, nB, min_dur_n)
+        if i0 is not None:
+            # i0 이후 첫 사이클 시작을 steady로
+            s2 = None
+            for (s, e) in cycles:
+                if s > i0:
+                    s2 = s; break
+            if s2 is None: s2 = min(i0 + min_dur_n, len(t) - 1)
+            i_move   = i0 if i_move   is None else i_move
+            i_steady = s2 if i_steady is None else i_steady
+            VOnT = float(t[i_steady] - t[i_move])
+
+    if (('i_end' not in locals()) or (i_end is None)) and (len(E_off) > 0):
+        start_i = int(i_last) if (i_last is not None) else 0
+        last_i = None; run = 0
+        for i in range(start_i, len(E_off)):
+            if E_off[i] > thr_off:
+                run += 1
+            else:
+                if run >= min_dur_n:
+                    last_i = i
+                run = 0
+        if last_i is None:
+            last_i = len(E_off) - 1
+        i_end = last_i
+        if i_last is None and len(cycles) > 0:
+            i_last = cycles[-1][0]
+        if i_last is not None:
+            VOffT = float(t[min(i_end, len(t)-1)] - t[i_last])
+
+    # ---- NaN 방어: None/NaN → 0.0 ----
+    if (VOnT is None) or (isinstance(VOnT, float) and np.isnan(VOnT)):   VOnT  = 0.0
+    if (VOffT is None) or (isinstance(VOffT, float) and np.isnan(VOffT)): VOffT = 0.0
+
+    # ---- DEBUG (패치 1) ----
+    st.write(
+        "DEBUG ▶ "
+        f"FPS={fps:.1f}, cycles={len(cycles)}, nB={nB}, "
+        f"thr_on={thr_on:.4g}, Tlow_on={Tlow_on:.4g}, "
+        f"thr_off={thr_off:.4g}, Tlow_off={Tlow_off:.4g}, "
+        f"i_move={i_move}, i_steady={i_steady}, i_last={i_last}, i_end={i_end}, "
+        f"VOnT={VOnT*1000:.2f} ms, VOffT={VOffT*1000:.2f} ms"
+    )
 
     per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
     summary = pd.DataFrame({
@@ -374,11 +432,12 @@ with st.expander("⚙ 고급 설정 (필요 시만 조정)", expanded=False):
     W_ms       = c4.number_input("에너지 창(ms)", 2.0, 40.0, 40.0, 1.0)
     amp_frac   = c5.slider("정상화 최소 진폭 (max 비율)", 0.10, 0.90, 0.65, 0.01)
 
-    c6, c7 = st.columns(2)
+    c6, c7, c8 = st.columns(3)
     ap_thr = c6.slider("AP 임계값(steady 힌트)", 0.70, 1.00, 0.95, 0.01)
     tp_thr = c7.slider("TP 임계값(steady 힌트)", 0.70, 1.00, 0.98, 0.01)
+    force_total = c8.checkbox("onset 열 무시(총 에너지 사용)", value=False)
 
-with st.expander("🔬 고급(읽기전용: Hysteresis/Debounce)", expanded=False):
+with st.expander("🔬 고급(읽기전용: Hysteresis/Debounce & Debug)", expanded=False):
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Hysteresis Ratio", "0.78")
     c2.metric("Min Duration (ms)", "35")
@@ -406,7 +465,9 @@ if uploaded is not None:
     else:
         df = pd.read_excel(uploaded)
     with st.spinner("분석 중..."):
-        summary, per_cycle, extras = analyze(df, adv, show_debug_charts=show_debug)
+        summary, per_cycle, extras = analyze(
+            df, adv, show_debug_charts=show_debug, force_total_for_onset=force_total
+        )
 
     st.subheader("✅ 결과 요약")
     st.dataframe(summary, use_container_width=True)
