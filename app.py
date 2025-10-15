@@ -269,66 +269,99 @@ def analyze(df, adv):
         e = min(len(arr), idx + qn)
         return bool(np.all(arr[idx:e] <= thr_off)) if idx < len(arr) else True
 
-    # 5) movement 시작(i_move): on-run들 중 '조용구간 뒤' 최초 run의 시작
-    i_move = None
-    for s in runs_on_st:
-        if _has_quiet_before(E_on, s, quiet_n):
-            i_move = int(s)
+ # === 온셋: 램프-업 시작 기반 ===
+rise_pre_ms      = float(adv.get('rise_pre_ms', 100.0))
+rise_post_ms     = float(adv.get('rise_post_ms',  60.0))
+rise_frac        = float(adv.get('rise_frac',      0.15))
+rise_sustain_ms  = float(adv.get('rise_sustain_ms', 8.0))
+
+pre_n      = max(int(round(rise_pre_ms     / 1000.0 * fps)), 1)
+post_n     = max(int(round(rise_post_ms    / 1000.0 * fps)), 1)
+sustain_n  = max(int(round(rise_sustain_ms / 1000.0 * fps)), 1)
+
+win_lo = max(0, i_steady - pre_n)
+win_hi = min(len(smoothed), i_steady + post_n)
+seg    = smoothed[win_lo:win_hi]
+
+i_move = None
+if len(seg) >= sustain_n + 2:
+    b_local = float(np.min(seg))
+    p_local = float(np.max(seg))
+    thr_rise = b_local + rise_frac * (p_local - b_local)
+
+    slope = np.convolve(
+        np.diff(smoothed, prepend=smoothed[0]),
+        np.ones(sustain_n, dtype=float) / sustain_n,
+        mode="same"
+    )
+    for j in range(win_lo, i_steady):
+        if (smoothed[j] >= thr_rise) and np.all(slope[j:j + sustain_n] > 0):
+            i_move = j
             break
-    if i_move is None:
-        i_move = runs_on_st[0] if len(runs_on_st) else (cycles[0][0] if len(cycles) else 0)
-    t_move = float(t[i_move]) if len(t) else np.nan
 
-    # 6) steady/last-steady: 사이클 앵커
-    if len(cycles) >= 3:
-        g_amp = float(np.nanmax([np.nanmax(smoothed[s:e]) - np.nanmin(smoothed[s:e]) for s, e in cycles]))
+# 실패 시 on-run fallback
+if i_move is None:
+    i_move = int(runs_on_st[0]) if len(runs_on_st) else (cycles[0][0] if len(cycles) else 0)
+t_move = float(t[i_move]) if len(t) else np.nan
 
-        i_steady, t_steady = _first_steady_from(
-            t, smoothed, cycles, g_amp, i_move, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
-        )
-        if i_steady is None:
-            i_steady, t_steady = cycles[0][0], float(t[cycles[0][0]])
+# === 오프셋: 감쇠 시작 기반 ===
+look_ms    = float(adv.get('look_ms', 40.0))
+decay_frac = float(adv.get('decay_frac', 0.15))
+decay_sustain_ms = float(adv.get('decay_sustain_ms', 8.0))
 
-        i_last, t_last = _last_steady_before_end(
-            t, smoothed, cycles, g_amp, adv['K'], adv['ap_thr'], adv['tp_thr'], adv['amp_frac']
-        )
-        if i_last is None:
-            i_last, t_last = cycles[-1][1], float(t[cycles[-1][1]])
+look_n    = max(int(round(look_ms          / 1000.0 * fps)), 1)
+sustain_n = max(int(round(decay_sustain_ms / 1000.0 * fps)), 1)
 
-        # 7) movement 종료(i_end): last-steady 이후 run_off 중 '조용구간이 뒤에 보장'되는 마지막 run의 끝
-        i_end = None
-        for s, e in zip(runs_off_st, runs_off_en):
-            if s >= i_last and _has_quiet_after(E_off, e, quiet_n):
-                i_end = int(e)
-        if i_end is None:
-            i_end = cycles[-1][1]
-        t_end = float(t[min(i_end, len(t) - 1)])
+seg_off = smoothed[i_last:i_last + look_n] if i_last < len(smoothed) else np.array([])
+if len(seg_off) > 0:
+    pmax_local = float(np.max(seg_off))
+else:
+    pmax_local = float(np.max(smoothed[i_last:])) if i_last < len(smoothed) else float(np.max(smoothed))
 
-        VOnT  = float(t_steady - t_move) if (not np.isnan(t_steady) and not np.isnan(t_move)) else np.nan
-        VOffT = float(t_end    - t_last) if (not np.isnan(t_end)    and not np.isnan(t_last)) else np.nan
-    else:
-        VOnT, VOffT = np.nan, np.nan
+decay_threshold = pmax_local * (1.0 - decay_frac)
 
-    # 너무 작으면 0으로
-    if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
-    if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
+slope_off = np.convolve(
+    np.diff(smoothed, prepend=smoothed[0]),
+    np.ones(sustain_n, dtype=float) / sustain_n,
+    mode="same"
+)
+
+i_end = None
+for i in range(i_last, len(smoothed) - sustain_n):
+    if (smoothed[i] <= decay_threshold) and np.all(slope_off[i:i + sustain_n] < 0):
+        i_end = i
+        break
+
+if i_end is None:
+    i_end = cycles[-1][1]
+t_end = float(t[min(i_end, len(t) - 1)])
+
+# === 최종 VOnT/VOffT (초) ===
+VOnT  = float(t_steady - t_move) if (not np.isnan(t_steady) and not np.isnan(t_move)) else np.nan
+VOffT = float(t_end    - t_last) if (not np.isnan(t_end)    and not np.isnan(t_last)) else np.nan
+
+if VOnT  is not None and VOnT  < 1e-4: VOnT  = 0.0
+if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
+
 
 
     # ---- per-cycle detail (optional stub, empty for now) ----
     per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
 
     # ---- summary & extras ----
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "Amplitude Symmetry (AS)",
-            "Phase Symmetry (PS)",
-            "Voice Onset Time (VOnT, s)",
-            "Voice Offset Time (VOffT, s)",
-        ],
-        "Value": [AP, TP, AS, PS, VOnT, VOffT]
-    })
+VOnT_ms  = VOnT  * 1000.0 if not np.isnan(VOnT)  else np.nan
+VOffT_ms = VOffT * 1000.0 if not np.isnan(VOffT) else np.nan
+summary = pd.DataFrame({
+    "Parameter": [
+        "Amplitude Periodicity (AP)",
+        "Time Periodicity (TP)",
+        "Amplitude Symmetry (AS)",
+        "Phase Symmetry (PS)",
+        "Voice Onset Time (VOnT, ms)",
+        "Voice Offset Time (VOffT, ms)",
+    ],
+    "Value": [AP, TP, AS, PS, VOnT_ms, VOffT_ms]
+})
 
     extras = dict(fps=fps, n_cycles=len(cycles))
     return summary, per_cycle, extras
@@ -364,4 +397,5 @@ summary, per_cycle, extras = analyze(df, adv)
 st.subheader("✅ 결과 요약")
 st.dataframe(summary, use_container_width=True)
 st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
+
 
