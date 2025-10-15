@@ -348,8 +348,6 @@ if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
     # ---- per-cycle detail (optional stub, empty for now) ----
 per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
 
-   def analyze(df, adv):
-    ...
     per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
 
     # ---- summary & extras ----
@@ -402,6 +400,7 @@ summary, per_cycle, extras = analyze(df, adv)
 st.subheader("✅ 결과 요약")
 st.dataframe(summary, use_container_width=True)
 st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
+
 
 
 
