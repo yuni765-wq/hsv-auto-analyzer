@@ -1,10 +1,10 @@
-# app_v2.3.1.py
-# HSV Auto Analyzer – bias-corrected (hysteresis + debounce)
-# - One-file input: time + (left/right or total) + (optional onset/offset)
+# app_v2.3.2.py
+# HSV Auto Analyzer – bias-corrected++ (hysteresis + debounce + steady gating)
+# - 한 파일 입력: time + (left/right or total) + (optional onset/offset)
 # - Metrics: AP, TP, AS, PS, VOnT (ms), VOffT (ms)
-# - Adjustable thresholds in UI, advanced (read-only) hysteresis/debounce
+# - 보정 기본값: baseline 0.18s, k 2.5, hysteresis_ratio 0.78, amp_frac 0.70
+# - steady 구간 판정에 AP/TP 힌트 사용, 베이스라인 이전 조기 onset 방지
 
-import math
 import numpy as np
 import pandas as pd
 
@@ -17,9 +17,9 @@ except Exception:
 import streamlit as st
 
 # --------------------------- UI / PAGE ---------------------------------
-st.set_page_config(page_title="HSV Auto Analyzer v2.3.1", layout="wide")
-st.title("HSV Auto Analyzer v2.3.1")
-st.caption("AP/TP/AS/PS + Voice On/Off (히스테리시스/디바운스 보정 적용)")
+st.set_page_config(page_title="HSV Auto Analyzer v2.3.2", layout="wide")
+st.title("HSV Auto Analyzer v2.3.2")
+st.caption("AP/TP/AS/PS + Voice On/Off (히스테리시스/디바운스/steady 게이팅 보정)")
 
 # --------------------------- Utils -------------------------------------
 def _norm_cols(cols):
@@ -90,14 +90,20 @@ def _ap_tp(t: np.ndarray, total: np.ndarray, cycles: list) -> tuple:
         if e <= s: continue
         seg = total[s:e]
         amp = float(np.nanmax(seg) - np.nanmin(seg))
-        Ti = float(t[e] - t[s])
-        amps.append(amp); periods.append(max(Ti, 1e-9))
+        Ti  = float(t[e] - t[s])
+        amps.append(amp)
+        periods.append(max(Ti, 1e-9))
     amps, periods = np.array(amps, float), np.array(periods, float)
+
     def _periodicity(v):
-        m = np.nanmean(v); s = np.nanstd(v, ddof=1) if len(v) > 1 else 0.0
-        if not np.isfinite(m) or m <= 0: return np.nan
+        m = np.nanmean(v)
+        s = np.nanstd(v, ddof=1) if len(v) > 1 else 0.0
+        if not np.isfinite(m) or m <= 0:
+            return np.nan
         return _clamp01(1.0 - (s / m))
-    TP = _periodicity(periods); AP = _periodicity(amps)
+
+    TP = _periodicity(periods)
+    AP = _periodicity(amps)
     return (AP, TP)
 
 def _as_range(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
@@ -186,35 +192,37 @@ def analyze(df: pd.DataFrame, adv: dict):
     E_on  = _moving_rms(np.abs(np.diff(onset_series,  prepend=onset_series[0])),  W) if onset_series  is not None else E_total
     E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W) if offset_series is not None else E_total
 
-    baseline_s = adv.get("baseline_s", 0.15)
+    baseline_s = adv.get("baseline_s", 0.18)  # 보정 기본값
     nB = max(int(round(baseline_s * fps)), 5)
 
     def _thr(E):
         base = E[:min(nB, len(E))]
         mu0 = float(np.mean(base)) if len(base) else 0.0
         s0  = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
-        return mu0 + adv.get("k", 3.0) * s0
+        return mu0 + adv.get("k", 2.5) * s0
 
     thr_on, thr_off = _thr(E_on), _thr(E_off)
 
     # === Hysteresis + Debounce (NEW) ===
-    hysteresis_ratio = float(adv.get("hysteresis_ratio", 0.75))
-    min_duration_ms  = float(adv.get("min_duration_ms", 40))
-    refractory_ms    = float(adv.get("refractory_ms", 30))
+    hysteresis_ratio = float(adv.get("hysteresis_ratio", 0.78))
+    min_duration_ms  = float(adv.get("min_duration_ms", 45))
+    refractory_ms    = float(adv.get("refractory_ms", 35))
 
     Tlow_on, Tlow_off = hysteresis_ratio * thr_on, hysteresis_ratio * thr_off
     min_dur_n = max(1, int(round(min_duration_ms * fps / 1000.0)))
     refrac_n  = max(1, int(round(refractory_ms   * fps / 1000.0)))
 
-    # ---- onset: state machine ----
+    # ---- onset: state machine (baseline 이전 조기 on 금지) ----
     i_move = None
     in_voiced = False
     last_onset_idx = -10**9
     onset_idx = None
+    start_allowed = nB  # baseline 구간 이후만 onset 후보 허용
+
     for i in range(len(E_on)):
         x = E_on[i]
         if not in_voiced:
-            if x > thr_on and (i - last_onset_idx) >= refrac_n:
+            if i >= start_allowed and x > thr_on and (i - last_onset_idx) >= refrac_n:
                 in_voiced = True
                 onset_idx = i
                 last_onset_idx = i
@@ -223,30 +231,54 @@ def analyze(df: pd.DataFrame, adv: dict):
                 i_move = onset_idx
                 in_voiced = False
                 break
-    # fallback
+    # fallback (run-length)
     if i_move is None:
-        M = int(adv.get("M", 5))
+        M = int(adv.get("M", 60))
         above_on = (E_on > thr_on).astype(int)
         run_on = np.convolve(above_on, np.ones(M, dtype=int), mode="same")
         on_edges = np.diff(np.r_[0, (run_on >= M).astype(int), 0])
         on_starts = np.where(on_edges == 1)[0]
         i_move = int(on_starts[0]) if len(on_starts) else None
 
-    # ---- steady / last steady (기존 전략 유지) ----
+    # ---- steady / last steady (AP/TP 힌트 반영) ----
     VOnT = np.nan; VOffT = np.nan
     if len(cycles) >= 3:
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles]))
         if i_move is None: i_move = cycles[0][0]
         t_move = float(t[i_move])
 
-        amp_frac = adv.get("amp_frac", 0.3)
+        amp_frac = adv.get("amp_frac", 0.70)
+        ap_thr = adv.get("ap_thr", 0.95)
+        tp_thr = adv.get("tp_thr", 0.98)
+
+        def _local_periodicity(s, e):
+            amps, periods, cnt = [], [], 0
+            for (cs, ce) in cycles:
+                if ce <= s: continue
+                if cs >= e: break
+                seg = total_s[cs:ce]
+                amps.append(float(np.nanmax(seg) - np.nanmin(seg)))
+                periods.append(float(t[ce] - t[cs]))
+                cnt += 1
+                if cnt >= 3: break
+            if len(amps) < 2 or len(periods) < 2: return (0.0, 0.0)
+            def _p(v):
+                m = np.nanmean(v); sd = np.nanstd(v, ddof=1)
+                return max(0.0, min(1.0, 1.0 - (sd / m))) if m > 0 else 0.0
+            return (_p(amps), _p(periods))
+
         i_steady = None
         for (s, e) in cycles:
-            if s < i_move: continue
+            if s < i_move: 
+                continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp > 0 and amp >= amp_frac * g_amp:
-                i_steady = int(s); break
-        if i_steady is None: i_steady = cycles[0][0]
+                AP_loc, TP_loc = _local_periodicity(s, e)
+                if AP_loc >= ap_thr and TP_loc >= tp_thr:
+                    i_steady = int(s)
+                    break
+        if i_steady is None:
+            i_steady = cycles[0][0]
         t_steady = float(t[i_steady])
 
         i_last = None
@@ -254,7 +286,8 @@ def analyze(df: pd.DataFrame, adv: dict):
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp > 0 and amp >= amp_frac * g_amp:
                 i_last = int(s); break
-        if i_last is None: i_last = cycles[-1][1]
+        if i_last is None:
+            i_last = cycles[-1][1]
         t_last = float(t[i_last])
 
         # ---- offset: state machine (choose last valid) ----
@@ -271,22 +304,18 @@ def analyze(df: pd.DataFrame, adv: dict):
             else:
                 if x < Tlow_off and (i - seg_start) >= min_dur_n:
                     i_end = i
-                    in_voiced = False  # keep searching to get the last
+                    in_voiced = False  # 계속 탐색하여 마지막 종료지점 선택
         if i_end is None:
-            # fallback to run-length
-            M = int(adv.get("M", 5))
+            M = int(adv.get("M", 60))
             above_off = (E_off > thr_off).astype(int)
             run_off = np.convolve(above_off, np.ones(M, dtype=int), mode="same")
             off_edges = np.diff(np.r_[0, (run_off >= M).astype(int), 0])
             off_starts = np.where(off_edges == 1)[0]
             off_ends   = np.where(off_edges == -1)[0] - 1
             m = np.where(off_starts >= i_last)[0]
-            if len(m):
-                i_end = int(off_ends[m[-1]])
-            else:
-                i_end = int(cycles[-1][1])
+            i_end = int(off_ends[m[-1]]) if len(m) else int(cycles[-1][1])
 
-        t_end = float(t[min(i_end, len(t) - 1)]) if i_end is not None else float(t[cycles[-1][1]])
+        t_end = float(t[min(i_end, len(t) - 1)])
         VOnT  = float(t_steady - t_move)
         VOffT = float(t_end - t_last)
 
@@ -313,23 +342,23 @@ def analyze(df: pd.DataFrame, adv: dict):
 # ---------------------------- UI ---------------------------------------
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
 
-with st.expander("⚙ 고급 설정 (기본값 그대로 사용해도 충분)", expanded=False):
+with st.expander("⚙ 고급 설정 (필요 시만 조정)", expanded=False):
     c1, c2, c3, c4, c5 = st.columns(5)
-    baseline_s = c1.number_input("Baseline 구간(s)", 0.05, 0.50, 0.15, 0.01)
-    k          = c2.number_input("임계 배수 k", 1.0, 6.0, 2.3, 0.1)
+    baseline_s = c1.number_input("Baseline 구간(s)", 0.05, 0.50, 0.18, 0.01)
+    k          = c2.number_input("임계 배수 k", 1.0, 6.0, 2.5, 0.1)
     M          = c3.number_input("연속 프레임 M", 1, 150, 60, 1)
     W_ms       = c4.number_input("에너지 창(ms)", 2.0, 40.0, 40.0, 1.0)
-    amp_frac   = c5.slider("정상화 최소 진폭 (max 비율)", 0.10, 0.80, 0.65, 0.01)
+    amp_frac   = c5.slider("정상화 최소 진폭 (max 비율)", 0.10, 0.90, 0.70, 0.01)
 
     c6, c7 = st.columns(2)
-    ap_thr = c6.slider("AP 임계값(내부 steady 힌트)", 0.70, 1.00, 0.95, 0.01)
-    tp_thr = c7.slider("TP 임계값(내부 steady 힌트)", 0.70, 1.00, 0.98, 0.01)
+    ap_thr = c6.slider("AP 임계값(steady 힌트)", 0.70, 1.00, 0.95, 0.01)
+    tp_thr = c7.slider("TP 임계값(steady 힌트)", 0.70, 1.00, 0.98, 0.01)
 
 with st.expander("🔬 고급(읽기전용: 히스테리시스/디바운스)", expanded=False):
     c1, c2, c3 = st.columns(3)
-    c1.metric("Hysteresis Ratio", "0.75")
-    c2.metric("Min Duration (ms)", "40")
-    c3.metric("Refractory (ms)", "30")
+    c1.metric("Hysteresis Ratio", "0.78")
+    c2.metric("Min Duration (ms)", "45")
+    c3.metric("Refractory (ms)", "35")
 
 adv = dict(
     baseline_s=baseline_s,
@@ -340,9 +369,9 @@ adv = dict(
     ap_thr=ap_thr,
     tp_thr=tp_thr,
     # NEW: advanced fixed params
-    hysteresis_ratio=0.75,
-    min_duration_ms=40,
-    refractory_ms=30,
+    hysteresis_ratio=0.78,
+    min_duration_ms=45,
+    refractory_ms=35,
 )
 
 st.markdown("---")
