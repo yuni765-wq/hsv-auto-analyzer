@@ -349,8 +349,11 @@ if VOffT is not None and VOffT < 1e-4: VOffT = 0.0
 per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
 
     # ---- summary & extras ----
-VOnT_ms  = VOnT  * 1000.0 if not np.isnan(VOnT)  else np.nan
-VOffT_ms = VOffT * 1000.0 if not np.isnan(VOffT) else np.nan
+    # Voice onset/offset 값을 ms 단위로 변환
+    VOnT_ms = VOnT * 1000.0 if VOnT is not None and not np.isnan(VOnT) else np.nan
+    VOffT_ms = VOffT * 1000.0 if VOffT is not None and not np.isnan(VOffT) else np.nan
+
+    # 요약 테이블 생성
     summary = pd.DataFrame({
         "Parameter": [
             "Amplitude Periodicity (AP)",
@@ -363,10 +366,13 @@ VOffT_ms = VOffT * 1000.0 if not np.isnan(VOffT) else np.nan
         "Value": [AP, TP, AS, PS, VOnT_ms, VOffT_ms]
     })
 
+    # 부가정보: FPS, 검출된 사이클 수
     extras = dict(fps=fps, n_cycles=len(cycles))
+
+    # 결과 반환
     return summary, per_cycle, extras
 
-
+ 
 # ================================
 # Streamlit UI
 # ================================
@@ -398,6 +404,7 @@ summary, per_cycle, extras = analyze(df, adv)
 st.subheader("✅ 결과 요약")
 st.dataframe(summary, use_container_width=True)
 st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
+
 
 
 
