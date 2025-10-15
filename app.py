@@ -1,9 +1,10 @@
-# app_v2.3.6_clinical.py
-# HSV Auto Analyzer – v2 FINAL (Clinical preset + RMSE)
-# - v2.3.6 기반
-# - Clinical preset: baseline_s=0.06, k=1.10, M=40, W_ms=35, amp_frac=0.70, ap/tp=0.97
-# - UI 하한 확장: baseline_s ≥ 0.02s, k ≥ 0.50
-# - Hysteresis + Debounce + Steady gating + Robust fallbacks + RMSE
+# app_v2.4_clinical_final.py
+# HSV Auto Analyzer – v2.4 Clinical FINAL
+# - Clinical preset(default): baseline_s=0.06, k=0.90, M=40, W_ms=35, amp_frac=0.70, ap/tp=0.97
+# - UI lower bounds extended (baseline_s ≥ 0.02s, k ≥ 0.50)
+# - Hysteresis + Debounce + Steady gating + Robust fallbacks
+# - Onset search starts AFTER baseline + 15ms (anti-early-trigger)
+# - Built-in RMSE/MAE/Bias evaluator with CSV export
 
 import numpy as np
 import pandas as pd
@@ -17,8 +18,8 @@ except Exception:
     _HAS_SAVITZKY = False
 
 # --------------------------- Page ---------------------------------
-st.set_page_config(page_title="HSV Auto Analyzer v2 – Clinical", layout="wide")
-st.title("HSV Auto Analyzer v2 – Clinical FINAL")
+st.set_page_config(page_title="HSV Auto Analyzer v2.4 – Clinical Final", layout="wide")
+st.title("HSV Auto Analyzer v2.4 – Clinical FINAL")
 st.caption("AP/TP/AS/PS + VOnT/VOffT (히스테리시스·디바운스·steady 게이팅 + 디버그 + RMSE)")
 
 # --------------------------- Utils --------------------------------
@@ -28,7 +29,8 @@ def _moving_rms(x: np.ndarray, w: int) -> np.ndarray:
     if w is None or w <= 1:
         return np.sqrt(np.maximum(x * x, 0.0))
     w = int(w); pad = w // 2
-    xx = np.pad(x, (pad, pad), mode="edge"); ker = np.ones(w) / float(w)
+    xx = np.pad(x, (pad, pad), mode="edge")
+    ker = np.ones(w) / float(w)
     m2 = np.convolve(xx * xx, ker, mode="valid")
     return np.sqrt(np.maximum(m2, 0.0))
 
@@ -42,12 +44,14 @@ def _smooth(signal: np.ndarray, fps: float) -> np.ndarray:
         try: return savgol_filter(signal.astype(float), window_length=win, polyorder=3, mode="interp")
         except Exception: pass
     pad = win // 2
-    xx = np.pad(signal.astype(float), (pad, pad), mode="edge"); ker = np.ones(win) / float(win)
+    xx = np.pad(signal.astype(float), (pad, pad), mode="edge")
+    ker = np.ones(win) / float(win)
     return np.convolve(xx, ker, mode="valid")
 
 def _detect_peaks(y: np.ndarray) -> np.ndarray:
     if len(y) < 3: return np.array([], dtype=int)
-    s = np.sign(y[1:] - y[:-1]); return (np.where((s[:-1] > 0) & (s[1:] <= 0))[0] + 1).astype(int)
+    s = np.sign(y[1:] - y[:-1])
+    return (np.where((s[:-1] > 0) & (s[1:] <= 0))[0] + 1).astype(int)
 
 def _build_cycles(t: np.ndarray, sig: np.ndarray, min_frames: int=3) -> list:
     peaks = _detect_peaks(sig); cycles = []
@@ -105,7 +109,7 @@ def _ps(left,right,t,cycles):
 # ------------------------ Analyzer ------------------------------------
 def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_total_for_onset: bool=False):
     cols=_norm_cols(df.columns.tolist()); df.columns=cols
-    def pick(name): 
+    def pick(name):
         for c in cols:
             if name in c: return c
         return None
@@ -113,8 +117,10 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
     onc=pick("onset"); offc=pick("offset")
     if tc is None:
         empty=pd.DataFrame(); return (pd.DataFrame({"Parameter":[],"Value":[]}), empty, dict(fps=np.nan,n_cycles=0))
+
     t=df[tc].astype(float).values
     if np.nanmax(t)>10.0: t=t/1000.0
+
     if totc is not None: total = df[totc].astype(float).values
     elif lc is not None and rc is not None: total=(df[lc].astype(float).values + df[rc].astype(float).values)/2.0
     else:
@@ -155,14 +161,18 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
         st.write("🔎 Quick Signal Check"); st.line_chart(pd.DataFrame({"E_total":E_total}))
         st.line_chart(pd.DataFrame({"E_on":E_on,"E_off":E_off}))
 
-    baseline_s=adv.get("baseline_s",0.06)     # Clinical preset default
+    # ---- thresholds from baseline ----
+    baseline_s=adv.get("baseline_s",0.06)      # Clinical default
     nB=max(int(round(baseline_s*fps)),5)
+
     def _thr(E):
         base=E[:min(nB,len(E))]; mu0=float(np.mean(base)) if len(base) else 0.0
         s0=float(np.std(base,ddof=1)) if len(base)>1 else 0.0
-        return mu0 + adv.get("k",1.10)*s0         # Clinical preset default
+        return mu0 + adv.get("k",0.90)*s0       # Clinical default k
+
     thr_on,thr_off=_thr(E_on),_thr(E_off)
 
+    # ---- state machine params ----
     hysteresis_ratio=float(adv.get("hysteresis_ratio",0.78))
     min_duration_ms=float(adv.get("min_duration_ms",35))
     refractory_ms=float(adv.get("refractory_ms",30))
@@ -170,7 +180,7 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
     min_dur_n=max(1,int(round(min_duration_ms*fps/1000.0)))
     refrac_n=max(1,int(round(refractory_ms*fps/1000.0)))
 
-    # onset finder (start after baseline + 15ms)
+    # ---- onset detection (start after baseline + 15ms) ----
     i_move=None; in_voiced=False; last_onset=-10**9; onset_idx=None
     start_allowed = nB + int(0.015*fps)
     for i in range(len(E_on)):
@@ -191,11 +201,13 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
                 if x<Tlow_on and (i-onset_idx)>=dur_rel:
                     i_move=onset_idx; break
 
+    # ---- steady & offset ----
     VOnT=np.nan; VOffT=np.nan; i_steady=None; i_last=None; i_end=None
     if len(cycles)>=3 and i_move is not None:
         g_amp=float(np.nanmax([np.nanmax(total_s[s:e])-np.nanmin(total_s[s:e]) for s,e in cycles]))
         t_move=float(t[i_move])
         amp_frac=adv.get("amp_frac",0.70); ap_thr=adv.get("ap_thr",0.97); tp_thr=adv.get("tp_thr",0.97)
+
         def _local_p(s,e):
             amps=[]; pers=[]; cnt=0
             for cs,ce in cycles:
@@ -208,6 +220,7 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
             if len(amps)<2 or len(pers)<2: return (0.0,0.0)
             def _p(v): m=np.nanmean(v); sd=np.nanstd(v,ddof=1); return max(0.0,min(1.0,1.0-(sd/m))) if m>0 else 0.0
             return (_p(amps), _p(pers))
+
         for s,e in cycles:
             if s<=i_move: continue
             amp=float(np.nanmax(total_s[s:e])-np.nanmin(total_s[s:e]))
@@ -233,16 +246,18 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
                 if x<Tlow_off and (i-seg_start)>=min_dur_n:
                     i_end=i; in_voiced=False
         if i_end is None:
-            M=int(adv.get("M",40)); above=(E_off>thr_off).astype(int)
+            M=int(adv.get("M",40))
+            above=(E_off>thr_off).astype(int)
             run=np.convolve(above, np.ones(M,int), mode="same")
             edges=np.diff(np.r_[0,(run>=M).astype(int),0])
             starts=np.where(edges==1)[0]; ends=np.where(edges==-1)[0]-1
-            m=np.where(starts>=i_last)[0]; i_end=int(ends[m[-1]]) if len(m) else int(cycles[-1][1])
+            m=np.where(starts>=i_last)[0]
+            i_end=int(ends[m[-1]]) if len(m) else int(cycles[-1][1])
 
         t_steady=float(t[i_steady]); t_last=float(t[i_last]); t_end=float(t[min(i_end,len(t)-1)])
         VOnT=float(t_steady - t_move); VOffT=float(t_end - t_last)
 
-    # last-resort fallbacks
+    # ---- last-resort fallbacks ----
     def _first_cross_after(E,thr,start,min_len):
         run=0
         for i in range(start,len(E)):
@@ -251,6 +266,7 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
                 if run>=min_len: return i-(min_len-1)
             else: run=0
         return None
+
     if (VOnT is None) or (isinstance(VOnT,float) and np.isnan(VOnT)) or (i_move is None or i_steady is None):
         i0=_first_cross_after(E_on,thr_on,nB,max(1,int(round(35*fps/1000.0))))
         if i0 is not None:
@@ -297,16 +313,18 @@ def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool=False, force_to
 # ---------------------------- UI -----------------------------------
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx","csv"])
 
-# Preset buttons (apply via session_state)
+# Preset quick button
 if "preset_applied" not in st.session_state:
     st.session_state.preset_applied=False
+
 colp1, colp2 = st.columns([1,1])
-if colp1.button("🎛 Clinical Preset 적용", disabled=st.session_state.preset_applied is True):
-    st.session_state["baseline_s"]=0.06; st.session_state["k"]=1.10
+if colp1.button("🎛 Clinical Optimized Preset 적용", disabled=st.session_state.preset_applied is True):
+    st.session_state["baseline_s"]=0.06; st.session_state["k"]=0.90
     st.session_state["M"]=40; st.session_state["W_ms"]=35.0
     st.session_state["amp_frac"]=0.70; st.session_state["ap_thr"]=0.97; st.session_state["tp_thr"]=0.97
     st.session_state["force_total"]=False; st.session_state.preset_applied=True
     st.experimental_rerun()
+
 if colp2.button("🔁 기본값으로 재설정"):
     for k_ in ["baseline_s","k","M","W_ms","amp_frac","ap_thr","tp_thr","force_total","preset_applied"]:
         if k_ in st.session_state: del st.session_state[k_]
@@ -317,7 +335,7 @@ with st.expander("⚙ 고급 설정 (필요 시만 조정)", expanded=False):
     baseline_s = c1.number_input("Baseline 구간(s)", min_value=0.02, max_value=0.50,
                                  value=st.session_state.get("baseline_s",0.06), step=0.01, key="baseline_s")
     k          = c2.number_input("임계 배수 k", min_value=0.50, max_value=6.0,
-                                 value=st.session_state.get("k",1.10), step=0.05, key="k")
+                                 value=st.session_state.get("k",0.90), step=0.05, key="k")
     M          = c3.number_input("연속 프레임 M", 1, 150, value=st.session_state.get("M",40), step=1, key="M")
     W_ms       = c4.number_input("에너지 창(ms)", 2.0, 40.0, value=st.session_state.get("W_ms",35.0), step=1.0, key="W_ms")
     amp_frac   = c5.slider("정상화 최소 진폭 (max 비율)", 0.10, 0.90, value=st.session_state.get("amp_frac",0.70), step=0.01, key="amp_frac")
@@ -333,7 +351,8 @@ with st.expander("🔬 Hysteresis/Debounce & Debug", expanded=False):
     c3.metric("Refractory (ms)","30"); show_debug = c4.checkbox("Quick charts 보기", value=False)
 
 # RMSE buffer
-if "rmse_rows" not in st.session_state: st.session_state.rmse_rows=[]
+if "rmse_rows" not in st.session_state:
+    st.session_state.rmse_rows=[]
 
 adv=dict(
     baseline_s=baseline_s, k=k, M=M, W_ms=W_ms, amp_frac=amp_frac,
@@ -368,19 +387,29 @@ if uploaded is not None:
         )
 
     if st.session_state.rmse_rows:
-        df_rmse=pd.DataFrame(st.session_state.rmse_rows); st.dataframe(df_rmse, use_container_width=True)
+        df_rmse=pd.DataFrame(st.session_state.rmse_rows)
+        st.dataframe(df_rmse, use_container_width=True)
+
         def _rmse(x): return float(np.sqrt(np.mean(np.square(x)))) if len(x) else np.nan
         def _mae(x):  return float(np.mean(np.abs(x))) if len(x) else np.nan
         def _bias(x): return float(np.mean(x)) if len(x) else np.nan
+
         rmse_on=_rmse(df_rmse["err_on"].values); rmse_off=_rmse(df_rmse["err_off"].values)
-        mae_on=_mae(df_rmse["err_on"].values); mae_off=_mae(df_rmse["err_off"].values)
+        mae_on=_mae(df_rmse["err_on"].values);  mae_off=_mae(df_rmse["err_off"].values)
         bias_on=_bias(df_rmse["err_on"].values); bias_off=_bias(df_rmse["err_off"].values)
+
         m1,m2,m3,m4,m5,m6=st.columns(6)
-        m1.metric("RMSE Onset (ms)", f"{rmse_on:.2f}"); m2.metric("RMSE Offset (ms)", f"{rmse_off:.2f}")
-        m3.metric("MAE Onset (ms)", f"{mae_on:.2f}");  m4.metric("MAE Offset (ms)", f"{mae_off:.2f}")
-        m5.metric("Bias Onset (ms)", f"{bias_on:+.2f}"); m6.metric("Bias Offset (ms)", f"{bias_off:+.2f}")
+        m1.metric("RMSE Onset (ms)", f"{rmse_on:.2f}")
+        m2.metric("RMSE Offset (ms)", f"{rmse_off:.2f}")
+        m3.metric("MAE Onset (ms)", f"{mae_on:.2f}")
+        m4.metric("MAE Offset (ms)", f"{mae_off:.2f}")
+        m5.metric("Bias Onset (ms)", f"{bias_on:+.2f}")
+        m6.metric("Bias Offset (ms)", f"{bias_off:+.2f}")
+
         colx, coly = st.columns(2)
-        if colx.button("🧹 버퍼 초기화"): st.session_state.rmse_rows=[]; st.experimental_rerun()
+        if colx.button("🧹 버퍼 초기화"):
+            st.session_state.rmse_rows=[]; st.experimental_rerun()
+
         csv_buf=StringIO(); df_rmse.to_csv(csv_buf,index=False)
         st.download_button("⬇️ 결과 CSV 다운로드", data=csv_buf.getvalue(),
                            file_name="hsv_rmse_results.csv", mime="text/csv")
