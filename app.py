@@ -397,8 +397,8 @@ with st.expander("⚙ 고급 설정 (기본값 그대로 사용해도 충분)", 
     amp_frac = c5.slider("정상화 최소 진폭 (max에 대한 비율)", 0.10, 0.80, 0.35, 0.01)
 
     c6, c7 = st.columns(2)
-    ap_thr = c6.slider("AP 임계값(보정용, 내부 steady 탐색 힌트)", 0.70, 1.00, 0.90, 0.01)
-    tp_thr = c7.slider("TP 임계값(보정용, 내부 steady 탐색 힌트)", 0.70, 1.00, 0.95, 0.01)
+    ap_thr = c6.slider("AP 임계값(보정용, 내부 steady 탐색 힌트)", 0.70, 1.00, 0.92, 0.01)
+    tp_thr = c7.slider("TP 임계값(보정용, 내부 steady 탐색 힌트)", 0.70, 1.00, 0.97, 0.01)
 
 adv = dict(
     baseline_s=baseline_s if 'baseline_s' in locals() else 0.15,
@@ -427,6 +427,7 @@ if uploaded is not None:
 
 else:
     st.info("샘플 파일(시간 + 좌/우 또는 total, 선택적으로 onset/offset 컬럼)을 업로드해 주세요.")
+
 
 
 
