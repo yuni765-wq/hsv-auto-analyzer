@@ -404,3 +404,4 @@ st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles'
 
 
 
+
