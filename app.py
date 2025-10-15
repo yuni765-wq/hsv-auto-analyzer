@@ -1,11 +1,10 @@
-# app_v2.3.3.py
-# HSV Auto Analyzer – onset-stabilized (hysteresis + debounce + steady gating + robust E_on)
-# - 변경점:
-#   * E_on 품질 자동판단 → 부적합 시 total 에너지로 대체 (패치 A)
-#   * onset 상태기계 보강 + 완화 재탐색(fallback) (패치 B)
-#   * i_move == i_steady일 때 0 ms 방지 (패치 C)
-#   * 기본값 튜닝: baseline 0.18s, k 2.5, hysteresis_ratio 0.78, amp_frac 0.70,
-#                 min_duration_ms 35, refractory_ms 35
+# app_v2.3.4.py
+# HSV Auto Analyzer – onset-stabilized + debug (hysteresis + debounce + steady gating)
+# - DEBUG: FPS / Cycles / VOnT_raw / VOffT_raw 출력
+# - NaN 방어: None/NaN → 0.0 ms 로 스냅(표시 및 계산 안정)
+# - Quick check: E_total/E_on/E_off 차트(체크박스)로 바로 신호 확인
+# - 기본값(권장): baseline 0.18s, k 2.3, hysteresis_ratio 0.78, amp_frac 0.65,
+#                min_duration_ms 35, refractory_ms 30
 
 import numpy as np
 import pandas as pd
@@ -19,9 +18,9 @@ except Exception:
 import streamlit as st
 
 # --------------------------- UI / PAGE ---------------------------------
-st.set_page_config(page_title="HSV Auto Analyzer v2.3.3", layout="wide")
-st.title("HSV Auto Analyzer v2.3.3")
-st.caption("AP/TP/AS/PS + Voice On/Off (히스테리시스/디바운스/steady 게이팅 + onset 안정화)")
+st.set_page_config(page_title="HSV Auto Analyzer v2.3.4", layout="wide")
+st.title("HSV Auto Analyzer v2.3.4")
+st.caption("AP/TP/AS/PS + Voice On/Off (히스테리시스/디바운스/steady 게이팅 + 디버그)")
 
 # --------------------------- Utils -------------------------------------
 def _norm_cols(cols):
@@ -93,19 +92,13 @@ def _ap_tp(t: np.ndarray, total: np.ndarray, cycles: list) -> tuple:
         seg = total[s:e]
         amp = float(np.nanmax(seg) - np.nanmin(seg))
         Ti  = float(t[e] - t[s])
-        amps.append(amp)
-        periods.append(max(Ti, 1e-9))
+        amps.append(amp); periods.append(max(Ti, 1e-9))
     amps, periods = np.array(amps, float), np.array(periods, float)
-
     def _periodicity(v):
-        m = np.nanmean(v)
-        s = np.nanstd(v, ddof=1) if len(v) > 1 else 0.0
-        if not np.isfinite(m) or m <= 0:
-            return np.nan
+        m = np.nanmean(v); s = np.nanstd(v, ddof=1) if len(v) > 1 else 0.0
+        if not np.isfinite(m) or m <= 0: return np.nan
         return _clamp01(1.0 - (s / m))
-
-    TP = _periodicity(periods)
-    AP = _periodicity(amps)
+    TP = _periodicity(periods); AP = _periodicity(amps)
     return (AP, TP)
 
 def _as_range(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
@@ -136,7 +129,7 @@ def _ps(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> flo
     return _clamp01(1.0 - _nanmean0(diffs))
 
 # ------------------------ Main analyzer ---------------------------------
-def analyze(df: pd.DataFrame, adv: dict):
+def analyze(df: pd.DataFrame, adv: dict, show_debug_charts: bool = False):
     # ---- column mapping ----
     cols = _norm_cols(df.columns.tolist()); df.columns = cols
     def pick(name):
@@ -184,48 +177,52 @@ def analyze(df: pd.DataFrame, adv: dict):
     AS     = _as_range(left_s, right_s, cycles)
     PS     = _ps(left_s, right_s, t, cycles)
 
-    # ---------- VOnT / VOffT (with hysteresis/ debounce) ----------
+    # ---------- Energies for onset/offset ----------
     diff_total = np.abs(np.diff(total_s, prepend=total_s[0]))
     W = max(int(round((adv.get("W_ms", 10.0) / 1000.0) * fps)), 3)
     E_total = _moving_rms(diff_total, W)
-    st.line_chart(E_total)
+
     onset_series  = df[onset_col].astype(float).values if onset_col else None
     offset_series = df[offset_col].astype(float).values if offset_col else None
 
-    # ---- 패치 A: E_on 품질 자동판단 후 선택 ----
+    # --- Robust E_on 선택 (평탄/희소 onset 열이면 total 사용)
     if onset_series is not None:
         E_on_candidate = _moving_rms(np.abs(np.diff(onset_series, prepend=onset_series[0])), W)
-        # 평탄/희소 여부 간단 판단(표준편차 + 유효 포인트 수)
         good = (np.nanstd(E_on_candidate) > 1e-6) and \
                (np.count_nonzero(E_on_candidate > np.nanmean(E_on_candidate)) > 5)
         E_on = E_on_candidate if good else E_total
     else:
         E_on = E_total
-
     E_off = _moving_rms(np.abs(np.diff(offset_series, prepend=offset_series[0])), W) if offset_series is not None else E_total
 
+    # Quick charts (옵션)
+    if show_debug_charts:
+        st.write("🔎 Quick Signal Check")
+        st.line_chart(pd.DataFrame({"E_total": E_total}))
+        st.line_chart(pd.DataFrame({"E_on": E_on, "E_off": E_off}))
+
     # ---- 임계값 (baseline 기반) ----
-    baseline_s = adv.get("baseline_s", 0.18)  # 보정 기본값
+    baseline_s = adv.get("baseline_s", 0.18)
     nB = max(int(round(baseline_s * fps)), 5)
 
     def _thr(E):
         base = E[:min(nB, len(E))]
         mu0 = float(np.mean(base)) if len(base) else 0.0
         s0  = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
-        return mu0 + adv.get("k", 2.5) * s0
+        return mu0 + adv.get("k", 2.3) * s0
 
     thr_on, thr_off = _thr(E_on), _thr(E_off)
 
     # === Hysteresis + Debounce ===
     hysteresis_ratio = float(adv.get("hysteresis_ratio", 0.78))
-    min_duration_ms  = float(adv.get("min_duration_ms", 35))   # 기본값 35 (완화)
-    refractory_ms    = float(adv.get("refractory_ms", 35))
+    min_duration_ms  = float(adv.get("min_duration_ms", 35))
+    refractory_ms    = float(adv.get("refractory_ms", 30))
 
     Tlow_on, Tlow_off = hysteresis_ratio * thr_on, hysteresis_ratio * thr_off
     min_dur_n = max(1, int(round(min_duration_ms * fps / 1000.0)))
     refrac_n  = max(1, int(round(refractory_ms   * fps / 1000.0)))
 
-    # ---- onset: 상태기계 (패치 B: baseline 이후 + 완화 재탐색 포함) ----
+    # ---- onset: 상태기계 (baseline 이후 + 완화 재탐색) ----
     i_move = None
     in_voiced = False
     last_onset_idx = -10**9
@@ -245,7 +242,6 @@ def analyze(df: pd.DataFrame, adv: dict):
                 in_voiced = False
                 break
 
-    # 1차 실패 시 완화 재탐색
     if i_move is None:
         in_voiced = False
         onset_idx = None
@@ -262,13 +258,14 @@ def analyze(df: pd.DataFrame, adv: dict):
                     i_move = onset_idx
                     break
 
-    # ---- steady / last steady (AP/TP 힌트 반영) ----
+    # ---- steady / last steady ----
     VOnT = np.nan; VOffT = np.nan
+    i_steady = None; i_last = None
     if len(cycles) >= 3 and i_move is not None:
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles]))
         t_move = float(t[i_move])
 
-        amp_frac = adv.get("amp_frac", 0.70)
+        amp_frac = adv.get("amp_frac", 0.65)
         ap_thr = adv.get("ap_thr", 0.95)
         tp_thr = adv.get("tp_thr", 0.98)
 
@@ -288,36 +285,26 @@ def analyze(df: pd.DataFrame, adv: dict):
                 return max(0.0, min(1.0, 1.0 - (sd / m))) if m > 0 else 0.0
             return (_p(amps), _p(periods))
 
-        i_steady = None
         for (s, e) in cycles:
-            if s < i_move: 
-                continue
+            if s < i_move: continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp > 0 and amp >= amp_frac * g_amp:
                 AP_loc, TP_loc = _local_periodicity(s, e)
                 if AP_loc >= ap_thr and TP_loc >= tp_thr:
-                    i_steady = int(s)
-                    break
-        if i_steady is None:
-            i_steady = cycles[0][0]
+                    i_steady = int(s); break
+        if i_steady is None: i_steady = cycles[0][0]
 
-        # ---- 패치 C: i_move와 i_steady가 같거나 역전되면 steady를 다음 사이클로 미룸 ----
+        # steady가 move와 같거나 앞서면 다음 사이클로 미룸
         if i_steady <= i_move:
             for (s, e) in cycles:
                 if s > i_move:
-                    i_steady = s
-                    break
+                    i_steady = s; break
 
-        t_steady = float(t[i_steady])
-
-        i_last = None
         for (s, e) in reversed(cycles):
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp > 0 and amp >= amp_frac * g_amp:
                 i_last = int(s); break
-        if i_last is None:
-            i_last = cycles[-1][1]
-        t_last = float(t[i_last])
+        if i_last is None: i_last = cycles[-1][1]
 
         # ---- offset: 상태기계 (마지막 종료지점 선택) ----
         i_end = None
@@ -333,7 +320,7 @@ def analyze(df: pd.DataFrame, adv: dict):
             else:
                 if x < Tlow_off and (i - seg_start) >= min_dur_n:
                     i_end = i
-                    in_voiced = False  # 계속 탐색해 가장 마지막 종료 지점 선택
+                    in_voiced = False
         if i_end is None:
             M = int(adv.get("M", 60))
             above_off = (E_off > thr_off).astype(int)
@@ -344,13 +331,22 @@ def analyze(df: pd.DataFrame, adv: dict):
             m = np.where(off_starts >= i_last)[0]
             i_end = int(off_ends[m[-1]]) if len(m) else int(cycles[-1][1])
 
-        t_end = float(t[min(i_end, len(t) - 1)])
+        t_steady = float(t[i_steady])
+        t_last   = float(t[i_last])
+        t_end    = float(t[min(i_end, len(t) - 1)])
+
         VOnT  = float(t_steady - t_move)
         VOffT = float(t_end - t_last)
 
-    # 너무 작은 값은 0으로 스냅
-    if VOnT  is not None and not np.isnan(VOnT)  and VOnT  < 1e-4: VOnT  = 0.0
-    if VOffT is not None and not np.isnan(VOffT) and VOffT < 1e-4: VOffT = 0.0
+    # ---- NaN 방어: None/NaN → 0.0 ----
+    if (VOnT is None) or (isinstance(VOnT, float) and np.isnan(VOnT)):
+        VOnT = 0.0
+    if (VOffT is None) or (isinstance(VOffT, float) and np.isnan(VOffT)):
+        VOffT = 0.0
+
+    # ---- DEBUG 로그 ----
+    st.write(f"DEBUG ▶ FPS: {fps:.2f}, Cycles: {len(cycles)}, "
+             f"VOnT_raw(ms): {VOnT*1000:.2f}, VOffT_raw(ms): {VOffT*1000:.2f}")
 
     per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
     summary = pd.DataFrame({
@@ -362,18 +358,10 @@ def analyze(df: pd.DataFrame, adv: dict):
             "Voice Onset Time (VOnT, ms)",
             "Voice Offset Time (VOffT, ms)",
         ],
-        "Value": [AP, TP, AS, PS,
-                  (VOnT * 1000.0 if VOnT is not None and not np.isnan(VOnT) else np.nan),
-                  (VOffT * 1000.0 if VOffT is not None and not np.isnan(VOffT) else np.nan)]
+        "Value": [AP, TP, AS, PS, VOnT * 1000.0, VOffT * 1000.0]
     })
     extras = dict(fps=fps, n_cycles=len(cycles))
-    # ---- NaN 방어: 값이 None이거나 NaN이면 0으로 스냅 ----
-if VOnT is None or np.isnan(VOnT):
-    VOnT = 0.0
-if VOffT is None or np.isnan(VOffT):
-VOffT = 0.0
-return summary, per_cycle, extras
-st.write(f"DEBUG ▶ FPS: {fps:.2f}, Cycles: {len(cycles)}, VOnT_raw: {VOnT}, VOffT_raw: {VOffT}")
+    return summary, per_cycle, extras
 
 # ---------------------------- UI ---------------------------------------
 uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드하세요", type=["xlsx", "csv"])
@@ -381,20 +369,21 @@ uploaded = st.file_uploader("엑셀(.xlsx) 또는 CSV(.csv) 파일을 업로드�
 with st.expander("⚙ 고급 설정 (필요 시만 조정)", expanded=False):
     c1, c2, c3, c4, c5 = st.columns(5)
     baseline_s = c1.number_input("Baseline 구간(s)", 0.05, 0.50, 0.18, 0.01)
-    k          = c2.number_input("임계 배수 k", 1.0, 6.0, 2.5, 0.1)
+    k          = c2.number_input("임계 배수 k", 1.0, 6.0, 2.3, 0.1)
     M          = c3.number_input("연속 프레임 M", 1, 150, 60, 1)
     W_ms       = c4.number_input("에너지 창(ms)", 2.0, 40.0, 40.0, 1.0)
-    amp_frac   = c5.slider("정상화 최소 진폭 (max 비율)", 0.10, 0.90, 0.70, 0.01)
+    amp_frac   = c5.slider("정상화 최소 진폭 (max 비율)", 0.10, 0.90, 0.65, 0.01)
 
     c6, c7 = st.columns(2)
     ap_thr = c6.slider("AP 임계값(steady 힌트)", 0.70, 1.00, 0.95, 0.01)
     tp_thr = c7.slider("TP 임계값(steady 힌트)", 0.70, 1.00, 0.98, 0.01)
 
 with st.expander("🔬 고급(읽기전용: Hysteresis/Debounce)", expanded=False):
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Hysteresis Ratio", "0.78")
     c2.metric("Min Duration (ms)", "35")
-    c3.metric("Refractory (ms)", "35")
+    c3.metric("Refractory (ms)", "30")
+    show_debug = c4.checkbox("Quick charts 보기", value=False)
 
 adv = dict(
     baseline_s=baseline_s,
@@ -404,10 +393,9 @@ adv = dict(
     amp_frac=amp_frac,
     ap_thr=ap_thr,
     tp_thr=tp_thr,
-    # NEW: advanced fixed params
     hysteresis_ratio=0.78,
-    min_duration_ms=35,  # 완화
-    refractory_ms=35,
+    min_duration_ms=35,
+    refractory_ms=30,
 )
 
 st.markdown("---")
@@ -418,12 +406,10 @@ if uploaded is not None:
     else:
         df = pd.read_excel(uploaded)
     with st.spinner("분석 중..."):
-        summary, per_cycle, extras = analyze(df, adv)
+        summary, per_cycle, extras = analyze(df, adv, show_debug_charts=show_debug)
 
     st.subheader("✅ 결과 요약")
     st.dataframe(summary, use_container_width=True)
     st.write(f"FPS: {extras.get('fps', np.nan):.1f}, 검출된 사이클 수: {extras.get('n_cycles', 0)}")
 else:
     st.info("샘플 파일(시간 + 좌/우 또는 total, 선택적으로 onset/offset 컬럼)을 업로드해 주세요.")
-
-
