@@ -371,8 +371,8 @@ def analyze(df: pd.DataFrame, adv: dict):
 if VOnT is None or np.isnan(VOnT):
     VOnT = 0.0
 if VOffT is None or np.isnan(VOffT):
-    VOffT = 0.0
-    return summary, per_cycle, extras
+VOffT = 0.0
+return summary, per_cycle, extras
 st.write(f"DEBUG ▶ FPS: {fps:.2f}, Cycles: {len(cycles)}, VOnT_raw: {VOnT}, VOffT_raw: {VOffT}")
 
 # ---------------------------- UI ---------------------------------------
@@ -425,4 +425,5 @@ if uploaded is not None:
     st.write(f"FPS: {extras.get('fps', np.nan):.1f}, 검출된 사이클 수: {extras.get('n_cycles', 0)}")
 else:
     st.info("샘플 파일(시간 + 좌/우 또는 total, 선택적으로 onset/offset 컬럼)을 업로드해 주세요.")
+
 
