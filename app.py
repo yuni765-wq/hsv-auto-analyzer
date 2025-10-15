@@ -365,26 +365,6 @@ summary = pd.DataFrame({
 extras = dict(fps=fps, n_cycles=len(cycles))
 return summary, per_cycle, extras
 
-
-    # ---- summary & extras ----
-    VOnT_ms  = VOnT  * 1000.0 if VOnT  is not None and not np.isnan(VOnT)  else np.nan
-    VOffT_ms = VOffT * 1000.0 if VOffT is not None and not np.isnan(VOffT) else np.nan
-
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "Amplitude Symmetry (AS)",
-            "Phase Symmetry (PS)",
-            "Voice Onset Time (VOnT, ms)",
-            "Voice Offset Time (VOffT, ms)",
-        ],
-        "Value": [AP, TP, AS, PS, VOnT_ms, VOffT_ms]
-    })
-
-    extras = dict(fps=fps, n_cycles=len(cycles))
-    return summary, per_cycle, extras
-
   
 # ================================
 # Streamlit UI
@@ -417,6 +397,7 @@ summary, per_cycle, extras = analyze(df, adv)
 st.subheader("✅ 결과 요약")
 st.dataframe(summary, use_container_width=True)
 st.write(f"FPS: {extras['fps']:.1f}, 검출된 사이클 수: {extras['n_cycles']}")
+
 
 
 
