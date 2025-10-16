@@ -60,7 +60,13 @@ else:
 # summary:  Parameter/Value 표 (AP/TP/AS/PS/VOnT/VOffT 포함)
 # per_cycle: (옵션) 사이클 상세
 # extras:   fps, n_cycles, 그리고 viz(dict) = 그래프 재료
-summary, per_cycle, extras = analyze(df, adv)
+if __name__ == "__main__":
+    # (테스트용) 직접 실행 시에만 작동하도록
+    import pandas as pd
+    df = pd.read_excel("sample.xlsx")
+    adv = dict(baseline_s=0.08, k=2.3, M=60, W_ms=40.0, amp_frac=0.65)
+    summary, per_cycle, extras = analyze(df, adv)
+    print(summary)
 
 # viz 파트(시간축, 신호, 에너지, 임계선/히스테리시스, 마커 등)
 viz = extras.get("viz", {})
@@ -267,4 +273,5 @@ with tab3:
     
 st.markdown("---")
 st.caption("© 2025 Isaka × Lian | HSV Auto Analyzer v2.5 (v2.4 engine + v2.5 UI)")
+
 
