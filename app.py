@@ -207,8 +207,8 @@ def analyze(df: pd.DataFrame, adv: dict):
 
     # ---- 에너지/임계/히스테리시스 기반 VOnT/VOffT ----
     W_ms       = float(adv.get("W_ms", 35.0))
-    baseline_s = float(adv.get("baseline_s", 0.08))
-    k          = float(adv.get("k", 2.0))
+    baseline_s = float(adv.get("baseline_s", 0.06))
+    k          = float(adv.get("k", 0.90))
     amp_frac   = float(adv.get("amp_frac", 0.70))
 
     # 고정 규칙 (요청대로 내부 고정)
@@ -292,7 +292,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         # 첫 steady
         i_steady = None
         for s, e in cycles:
-            if s < i_move:  # 움직임 이후 사이클만
+            if s <= i_move:  # 움직임 이후 사이클만
                 continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp <= 0 or (amp >= amp_frac * g_amp):
@@ -357,11 +357,11 @@ def analyze(df: pd.DataFrame, adv: dict):
 # ============== 사이드바 세팅 ==============
 with st.sidebar:
     st.markdown("### ⚙ Settings")
-    baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.08, step=0.01)
-    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00, value=2.30, step=0.10)
+    baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.06, step=0.01)
+    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00, value=0.90, step=0.10)
     M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=60, step=1)
-    W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=40.0, value=40.0, step=1.0)
-    amp_frac   = st.slider("정상화 최소 진폭 비율", 0.10, 0.80, 0.65, 0.01)
+    W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=40.0, value=35.0, step=1.0)
+    amp_frac   = st.slider("정상화 최소 진폭 비율", 0.10, 0.80, 0.70, 0.01)
 
 adv = dict(baseline_s=baseline_s, k=k, M=M, W_ms=W_ms, amp_frac=amp_frac)
 
@@ -561,3 +561,4 @@ with tab2:
 with tab3:
     st.subheader("📊 Validation (RMSE / MAE / Bias)")
     st.info("자동 vs 수동 측정치 정량검증은 v2.5.1에서 확장 예정입니다. (멀티 케이스, RMSE 집계, Bias 히스토그램)")
+
