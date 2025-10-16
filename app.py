@@ -358,8 +358,8 @@ def analyze(df: pd.DataFrame, adv: dict):
 with st.sidebar:
     st.markdown("### ⚙ Settings")
     baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.06, step=0.01)
-    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00, value=0.90, step=0.10)
-    M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=60, step=1)
+    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00, value=1.10, step=0.10)
+    M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=40, step=1)
     W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=40.0, value=35.0, step=1.0)
     amp_frac   = st.slider("정상화 최소 진폭 비율", 0.10, 0.80, 0.70, 0.01)
 
@@ -561,4 +561,5 @@ with tab2:
 with tab3:
     st.subheader("📊 Validation (RMSE / MAE / Bias)")
     st.info("자동 vs 수동 측정치 정량검증은 v2.5.1에서 확장 예정입니다. (멀티 케이스, RMSE 집계, Bias 히스토그램)")
+
 
