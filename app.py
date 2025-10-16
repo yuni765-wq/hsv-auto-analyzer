@@ -530,7 +530,7 @@ with T2:
         st.markdown("#### A) Total")
         st.plotly_chart(build_total_plot(viz_s, zoom_preset, show_cycles, show_markers), use_container_width=True)
 st.markdown("#### B) Left vs Right")
-    st.plotly_chart(build_lr_plot(viz_s, AS_s, PS_s, normalize_lr, zoom_preset), use_container_width=True)
+st.plotly_chart(build_lr_plot(viz_s, AS_s, PS_s, normalize_lr, zoom_preset), use_container_width=True)
 
 st.markdown("#### C) Energy + Thresholds")
     st.plotly_chart(build_energy_plot(viz_s, "on" if energy_mode=="Onset" else "off", show_markers, zoom_preset), use_container_width=True)
@@ -640,4 +640,5 @@ with T4:
 
 st.markdown("---")
 st.caption("NOTE: v3 정식본에서는 Adaptive Threshold Engine과 Pattern-based Detector, ROI/EGG 동기화가 추가됩니다.")
+
 
