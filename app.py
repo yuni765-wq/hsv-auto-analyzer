@@ -25,6 +25,12 @@ st.set_page_config(page_title="HSV Auto Analyzer v3 – Adaptive Clinical Engine
 st.title("HSV Auto Analyzer v3 – Adaptive Clinical Engine (Merged)")
 st.caption("v2.5 임상 엔진 + v3 프로필/배치/비교 기능 통합")
 
+# 세션 상태 초기화 (탭 간 공유)
+if 'viz' not in st.session_state:
+    st.session_state['viz'] = {}
+if 'metrics' not in st.session_state:
+    st.session_state['metrics'] = {}
+
 # 색상 팔레트 (v2.5 유지)
 COLOR_TOTAL   = "#FF0000"
 COLOR_LEFT    = "#0066FF"
@@ -488,6 +494,10 @@ with T1:
         st.caption(f"FPS: {fps:.1f} | 검출된 사이클 수: {ncyc}")
         st.dataframe(summary, use_container_width=True)
 
+        # 탭 간 공유 저장
+        st.session_state['viz'] = viz
+        st.session_state['metrics'] = dict(AP=AP, TP=TP, AS=AS, PS=PS, VOnT=VOnT, VOffT=VOffT, fps=fps, ncyc=ncyc)
+
         # QC flags
         qc_msgs = []
         if ncyc < 3: qc_msgs.append("cycles < 3")
@@ -508,12 +518,21 @@ with T2:
     normalize_lr  = colB.checkbox("좌/우 정규화", False)
     energy_mode   = colB.radio("에너지 뷰", ["Onset","Offset"], index=0, horizontal=True)
 
-    st.markdown("#### A) Total")
-    st.plotly_chart(build_total_plot(viz, zoom_preset, show_cycles, show_markers), use_container_width=True)
+    # 세션에서 최근 분석 결과 가져오기
+    viz_s = st.session_state.get('viz', {})
+    metrics_s = st.session_state.get('metrics', {})
+    AS_s = metrics_s.get('AS', np.nan)
+    PS_s = metrics_s.get('PS', np.nan)
+
+    if not viz_s:
+        st.info("먼저 탭①에서 파일을 분석해 주세요. 분석 결과가 여기 시각화에 표시됩니다.")
+    else:
+        st.markdown("#### A) Total")
+        st.plotly_chart(build_total_plot(viz_s, zoom_preset, show_cycles, show_markers), use_container_width=True)
     st.markdown("#### B) Left vs Right")
-    st.plotly_chart(build_lr_plot(viz, AS if 'AS' in locals() else np.nan, PS if 'PS' in locals() else np.nan, normalize_lr, zoom_preset), use_container_width=True)
+        st.plotly_chart(build_lr_plot(viz_s, AS_s, PS_s, normalize_lr, zoom_preset), use_container_width=True)
     st.markdown("#### C) Energy + Thresholds")
-    st.plotly_chart(build_energy_plot(viz, "on" if energy_mode=="Onset" else "off", show_markers, zoom_preset), use_container_width=True)
+        st.plotly_chart(build_energy_plot(viz_s, "on" if energy_mode=="Onset" else "off", show_markers, zoom_preset), use_container_width=True)
 
 # ---------- 탭3: 배치 검증 (RMSE/MAE/Bias) ----------
 with T3:
