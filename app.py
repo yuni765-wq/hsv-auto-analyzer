@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------
-# HSV Auto Analyzer v2.5 – Clinical Visualization (One-file build)
+# HSV Auto Analyzer v2.5 Final – Clinical Visualization (One-file)
 # Isaka × Lian
 # ---------------------------------------------------------------
 # 실행: streamlit run app.py
-# 요구: streamlit, plotly, pandas, numpy, openpyxl(엑셀 사용할 때)
+# 요구: streamlit, plotly, pandas, numpy, openpyxl(엑셀)
 # ---------------------------------------------------------------
 
 import math
@@ -147,10 +147,9 @@ def _ps(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> flo
 # ============== v2.4 엔진: analyze(df, adv) ==============
 def analyze(df: pd.DataFrame, adv: dict):
     """
-    입력 df: time + (left/right 또는 total) + (선택) onset/offset 트레이스.
+    입력 df: time + (left/right 또는 total) + (선택) onset/offset.
     adv: dict(baseline_s, k, M, W_ms, amp_frac)
-    반환:
-      summary(DataFrame), per_cycle(DataFrame/빈), extras(dict: fps, n_cycles, viz)
+    반환: summary(DataFrame), per_cycle(빈), extras(dict: fps, n_cycles, viz)
     """
     # ---- 컬럼 매핑 ----
     cols = _norm_cols(df.columns.tolist())
@@ -208,10 +207,10 @@ def analyze(df: pd.DataFrame, adv: dict):
     # ---- 에너지/임계/히스테리시스 기반 VOnT/VOffT ----
     W_ms       = float(adv.get("W_ms", 35.0))
     baseline_s = float(adv.get("baseline_s", 0.06))
-    k          = float(adv.get("k", 0.90))
+    k          = float(adv.get("k", 1.10))
     amp_frac   = float(adv.get("amp_frac", 0.70))
 
-    # 고정 규칙 (요청대로 내부 고정)
+    # 고정 규칙
     hysteresis_ratio = 0.70      # T_low = 0.7 * T_high
     min_event_ms     = 40.0      # 디바운스: 최소 지속시간
     refractory_ms    = 30.0      # 불응기간
@@ -255,31 +254,29 @@ def analyze(df: pd.DataFrame, adv: dict):
         starts, ends = [], []
         i = 0
         N = len(E)
-        state = 0  # 0: below, 1: in-run (hysteresis 유지)
+        state = 0  # 0: below, 1: in-run
         while i < N:
             if state == 0:
-                # 조건: high 임계 이상이 min_frames_ev 연속
                 if i + min_frames_ev <= N and np.all(above[i:i+min_frames_ev] == 1):
                     state = 1
                     starts.append(i)
                     i += min_frames_ev
-                    i += refr_frames  # 불응기간
+                    i += refr_frames
                     continue
                 i += 1
             else:
-                # run 상태 유지: low 임계 이상이면 유지
                 if low[i] == 1:
                     i += 1
                 else:
                     ends.append(i)
                     state = 0
-                    i += refr_frames  # 불응기간
+                    i += refr_frames
         return np.array(starts, int), np.array(ends, int)
 
     on_starts, on_ends   = _hyst_detect(E_on,  Th_on,  Tl_on,  "rise")
     off_starts, off_ends = _hyst_detect(E_off, Th_off, Tl_off, "fall")
 
-    # 움직임 시작 i_move = 첫 on_starts, steady는 g_amp 비율 조건으로 첫 cycle 시작
+    # 움직임 시작 i_move
     i_move = int(on_starts[0]) if len(on_starts) else (cycles[0][0] if len(cycles) else None)
 
     VOnT = np.nan
@@ -289,14 +286,24 @@ def analyze(df: pd.DataFrame, adv: dict):
         # 전역 진폭
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles])) if cycles else 0.0
 
-        # 첫 steady
+        # 첫 steady: 반드시 move "다음" 사이클에서 찾기(0ms 방지)
         i_steady = None
         for s, e in cycles:
-            if s <= i_move:  # 움직임 이후 사이클만
+            if s <= i_move:   # '<=' 로 가드
                 continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp <= 0 or (amp >= amp_frac * g_amp):
                 i_steady = int(s); break
+        # 최소 간격 4ms 보정
+        MIN_VONT_GAP = int(round(0.004 * fps))
+        if i_steady is not None and (i_steady - i_move) < MIN_VONT_GAP:
+            for s, e in cycles:
+                if s <= i_move + MIN_VONT_GAP:
+                    continue
+                amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
+                if g_amp <= 0 or (amp >= amp_frac * g_amp):
+                    i_steady = int(s)
+                    break
         if i_steady is None:
             i_steady = cycles[0][0] if cycles else i_move
 
@@ -309,15 +316,14 @@ def analyze(df: pd.DataFrame, adv: dict):
         if i_last is None:
             i_last = cycles[-1][0] if cycles else (len(t)-1)
 
-        # 움직임 종료: 마지막 steady 이후의 활성 run 종료점
-        # off_ends 중 i_last 이후 가장 마지막
+        # 움직임 종료
         idxs = np.where(off_ends >= i_last)[0] if len(off_ends) else []
         if len(idxs):
             i_end = int(off_ends[idxs[-1]])
         else:
             i_end = cycles[-1][1] if cycles else (len(t)-1)
 
-        # 시간 계산
+        # 시간 계산(ms)
         t_move   = float(t[i_move]) if i_move   is not None else np.nan
         t_steady = float(t[i_steady]) if i_steady is not None else np.nan
         t_last   = float(t[i_last]) if i_last   is not None else np.nan
@@ -354,7 +360,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, per_cycle, extras
 
-# ============== 사이드바 세팅 ==============
+# ============== 사이드바 세팅(기본값: 임상 근사 튜닝) ==============
 with st.sidebar:
     st.markdown("### ⚙ Settings")
     baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.06, step=0.01)
@@ -561,5 +567,3 @@ with tab2:
 with tab3:
     st.subheader("📊 Validation (RMSE / MAE / Bias)")
     st.info("자동 vs 수동 측정치 정량검증은 v2.5.1에서 확장 예정입니다. (멀티 케이스, RMSE 집계, Bias 히스토그램)")
-
-
