@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 # ============ ❶ v2.4 분석엔진을 가져옵니다 (동일 폴더에 존재해야 함) ============
 # 파일명/함수명은 어제 쓰신 이름에 맞춰주세요.
 # 예) app_v2_4_Final.py 에 analyze(df, adv) 가 정의되어 있다고 가정
-from app_v2_4_Final import analyze  # ★★ 핵심: v2.4 엔진 그대로 사용 ★★
+from app import analyze  # ★★ 핵심: v2.4 엔진 그대로 사용 ★★
 
 # ============ 페이지 / 레이아웃 기본 ============ #
 st.set_page_config(page_title="HSV Auto Analyzer v2.5 – Clinical Visualization", layout="wide")
@@ -268,3 +268,4 @@ with tab3:
     
 st.markdown("---")
 st.caption("© 2025 Isaka × Lian | HSV Auto Analyzer v2.5 (v2.4 engine + v2.5 UI)")
+
