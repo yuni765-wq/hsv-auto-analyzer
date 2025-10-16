@@ -492,9 +492,9 @@ with T1:
         qc_msgs = []
         if ncyc < 3: qc_msgs.append("cycles < 3")
         if AS is not None and not np.isnan(AS) and AS < 0.6: qc_msgs.append("AS < 0.6 (비대칭 가능)")
-        if VOnT is not None and VLast := _get(summary, "Voice Offset Time (VOffT, ms)"):
-            if np.isfinite(VOnT) and np.isfinite(VLast) and (VOnT <= 0):
-                qc_msgs.append("VOnT ≤ 0 → 프리셋 상향 또는 k↑/W↑ 권장")
+        VLast = _get(summary, "Voice Offset Time (VOffT, ms)")
+        if (VOnT is not None) and (VLast is not None) and np.isfinite(VOnT) and np.isfinite(VLast) and (VOnT <= 0):
+            qc_msgs.append("VOnT ≤ 0 → 프리셋 상향 또는 k↑/W↑ 권장")
         if qc_msgs: st.warning("QC 경고: " + "; ".join(qc_msgs))
 
 # ---------- 탭2: 시각화 ----------
