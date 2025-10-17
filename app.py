@@ -1,9 +1,9 @@
+
 # ---------------------------------------------------------------
-# HSV Auto Analyzer v3-alpha – PS/AS 패치 버전 (single file)
-# Isaka × Lian
-# ---------------------------------------------------------------
-# 실행: streamlit run app.py
-# 요구: streamlit, plotly, pandas, numpy, (optional) scipy, openpyxl
+# HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged)
+# Isaka × Lian – app_v3alpha_overview_fix.py
+# 실행: streamlit run app_v3alpha_overview_fix.py
+# 요구: streamlit, plotly, pandas, numpy, (optional) scipy
 # ---------------------------------------------------------------
 
 import math
@@ -12,31 +12,31 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
-# optional: scipy savgol (없어도 동작)
+# optional savgol
 try:
     from scipy.signal import savgol_filter
     _HAS_SAVGOL = True
 except Exception:
     _HAS_SAVGOL = False
 
-# ============== UI 기본 ==============
-st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – PS/AS 패치", layout="wide")
-st.title("HSV Auto Analyzer v3-alpha – PS/AS 패치")
-st.caption("Isaka × Lian | 조명 독립형 AS + PS(circular distance) 적용 · v2.5 기반 엔진")
+st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine",
+                   layout="wide")
+st.title("HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged)")
+st.caption("Isaka × Lian | v2.5 engine + v3 PS/AS metrics + Overview fix")
 
-# 색상 팔레트
-COLOR_TOTAL   = "#FF0000"   # red (total)
-COLOR_LEFT    = "#0066FF"   # blue-ish (left)
-COLOR_RIGHT   = "#00AA00"   # green (right)
-COLOR_CRIMSON = "#DC143C"   # onset energy/marker
-COLOR_ROYAL   = "#4169E1"   # offset energy/marker
+# ============== Colors ==============
+COLOR_TOTAL   = "#FF0000"
+COLOR_LEFT    = "#0066FF"
+COLOR_RIGHT   = "#00AA00"
+COLOR_CRIMSON = "#DC143C"
+COLOR_ROYAL   = "#4169E1"
 COLOR_BAND    = "rgba(0,0,0,0.08)"
-COLOR_MOVE    = "#800080"   # move
-COLOR_STEADY  = "#00A36C"   # steady
-COLOR_LAST    = "#FFA500"   # last steady
-COLOR_END     = "#FF0000"   # end
+COLOR_MOVE    = "#800080"
+COLOR_STEADY  = "#00A36C"
+COLOR_LAST    = "#FFA500"
+COLOR_END     = "#FF0000"
 
-# ============== Low-level utils ==============
+# ============== Utils ==============
 def _norm_cols(cols):
     return [c.lower().strip().replace(" ", "_") for c in cols]
 
@@ -95,11 +95,7 @@ def _nanmean0(x):
     v = np.nanmean(x) if len(x) else np.nan
     return 0.0 if (v is None or np.isnan(v)) else float(v)
 
-# 새: peak-to-peak helper
-_def_pp = lambda x: float(np.nanmax(x) - np.nanmin(x)) if (x is not None and len(x)) else np.nan
-
-# ============== Metrics ==============
-
+# ============== v3 Metrics ==============
 def _ap_tp(t: np.ndarray, total: np.ndarray, cycles: list) -> tuple:
     if len(cycles) < 3:
         return (np.nan, np.nan)
@@ -123,9 +119,7 @@ def _ap_tp(t: np.ndarray, total: np.ndarray, cycles: list) -> tuple:
     AP = _periodicity(amps)
     return (AP, TP)
 
-# 기존 AS(범위 기반 평균)는 유지하되, 보완 지표 3종을 병기한다.
-
-def _as_range_median(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
+def _as_legacy(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
     if left is None or right is None or len(cycles) < 1:
         return np.nan
     ratios = []
@@ -133,96 +127,86 @@ def _as_range_median(left: np.ndarray, right: np.ndarray, cycles: list) -> float
         L = float(np.nanmax(left[s:e]) - np.nanmin(left[s:e]))
         R = float(np.nanmax(right[s:e]) - np.nanmin(right[s:e]))
         m = max(L, R)
-        if m > 0:
-            ratios.append(min(L, R) / m)
-    return _clamp01(float(np.median(ratios))) if len(ratios) else np.nan
+        ratios.append((min(L, R) / m) if m > 0 else np.nan)
+    return _clamp01(_nanmean0(ratios))
 
-# 새: 게인 정규화 + AS_area/AS_corr 계산
-
-def _compute_as_triplet(left_s, right_s, total_s, cycles, fps, amp_frac):
-    if left_s is None or right_s is None or len(cycles) == 0:
-        return dict(AS_range=np.nan, AS_area=np.nan, AS_corr=np.nan)
-
-    # steady cycle 선택 (전역 진폭의 amp_frac 이상)
-    g_amp = float(np.nanmax([_def_pp(total_s[s:e]) for s,e in cycles])) if cycles else 0.0
-    steady = [(s,e) for (s,e) in cycles if g_amp<=0 or _def_pp(total_s[s:e]) >= amp_frac * g_amp]
-    use_cyc = steady if len(steady)>=3 else cycles
-
-    eps = 1e-12
-    # 게인 보정 계수: steady 구간의 p2p 중앙값
-    A_L = []; A_R = []
-    for s,e in use_cyc:
-        A_L.append(_def_pp(left_s[s:e])); A_R.append(_def_pp(right_s[s:e]))
-    sL = float(np.nanmedian(A_L)) if len(A_L) else 1.0
-    sR = float(np.nanmedian(A_R)) if len(A_R) else 1.0
-    if not np.isfinite(sL) or sL<=0: sL = 1.0
-    if not np.isfinite(sR) or sR<=0: sR = 1.0
-
-    Lp = left_s  / (sL + eps)
-    Rp = right_s / (sR + eps)
-
-    r_list, q_list, c_list = [], [], []
-    for s,e in use_cyc:
-        # range ratio
-        aL = _def_pp(Lp[s:e]); aR = _def_pp(Rp[s:e])
-        if max(aL,aR) > eps:
-            r_list.append(min(aL,aR)/max(aL,aR))
-        # area ratio (trapz of abs)
-        EL = float(np.trapz(np.abs(Lp[s:e]), dx=1.0/max(fps,1e-9)))
-        ER = float(np.trapz(np.abs(Rp[s:e]), dx=1.0/max(fps,1e-9)))
-        if max(EL,ER) > eps:
-            q_list.append(min(EL,ER)/max(EL,ER))
-        # correlation (shape)
-        x = Lp[s:e]; y = Rp[s:e]
-        if len(x)>=5 and np.nanstd(x)>0 and np.nanstd(y)>0:
-            c = np.corrcoef(x,y)[0,1]
-            c_list.append(max(0.0, float(c)))
-
-    AS_range = float(np.median(r_list)) if len(r_list) else np.nan
-    AS_area  = float(np.median(q_list)) if len(q_list) else np.nan
-    AS_corr  = float(np.median(c_list)) if len(c_list) else np.nan
-    return dict(AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr)
-
-# 새: PS – circular distance 기반 + 표시용 distance 스케일 (0=정상, 1=비정상)
-
-def _ps_circular(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> tuple:
+def _ps_dist(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> tuple:
+    """Phase distance (0=good). Also returns PS_sim=1-PS_dist."""
     if left is None or right is None or len(cycles) < 1:
         return (np.nan, np.nan)
     dists = []
     for s, e in cycles:
-        segL = left[s:e]; segR = right[s:e]
-        if len(segL) < 3 or len(segR) < 3: continue
-        li = s + int(np.nanargmax(segL))
-        ri = s + int(np.nanargmax(segR))
-        Ti = float(t[e] - t[s]) if (t is not None) else np.nan
-        if not np.isfinite(Ti) or Ti <= 0: continue
+        li = s + int(np.nanargmax(left[s:e]))
+        ri = s + int(np.nanargmax(right[s:e]))
+        Ti = float(t[e] - t[s]) if (t is not None) else 1.0
+        if Ti <= 0: 
+            continue
         dt = abs(float(t[li] - t[ri]))
-        # circular (modulo) distance: 경계 래핑 보정
-        dt_circ = min(dt, max(Ti - dt, 0.0))
-        dists.append(min(1.0, dt_circ / Ti))
-    if not len(dists):
+        d = min(dt, Ti - dt) / Ti  # circular wrap
+        dists.append(min(1.0, d))
+    if not len(dists): 
         return (np.nan, np.nan)
-    PS_dist = float(np.nanmean(dists))           # 0=동위상(정상), 1=완전 반위상
-    PS_sim  = float(1.0 - PS_dist)               # 1=좋음, 0=나쁨 (과거 스케일)
-    return ( _clamp01(PS_sim), _clamp01(PS_dist) )
+    dist = _clamp01(_nanmean0(dists))
+    return dist, _clamp01(1.0 - dist)
 
-# ============== v2.4 엔진: analyze(df, adv) ==============
+def _as_gain_normalize(left: np.ndarray, right: np.ndarray, cycles: list):
+    """Return normalized L,R based on steady cycles median gain (robust)."""
+    if left is None or right is None or len(cycles) < 1:
+        return None, None
+    # collect per-cycle p2p
+    p2pL, p2pR = [], []
+    for s,e in cycles:
+        p2pL.append(float(np.nanmax(left[s:e]) - np.nanmin(left[s:e])))
+        p2pR.append(float(np.nanmax(right[s:e]) - np.nanmin(right[s:e])))
+    gL = np.nanmedian(p2pL) if len(p2pL) else np.nan
+    gR = np.nanmedian(p2pR) if len(p2pR) else np.nan
+    if not (np.isfinite(gL) and np.isfinite(gR)) or (gL <= 0 or gR <= 0):
+        return left, right
+    L = left / (gL + 1e-12)
+    R = right / (gR + 1e-12)
+    return L, R
 
+def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tuple:
+    """AS_range (robust), AS_area (energy), AS_corr (shape)"""
+    if left is None or right is None or len(cycles) < 1:
+        return (np.nan, np.nan, np.nan)
+    L, R = _as_gain_normalize(left, right, cycles)
+    if L is None or R is None:
+        return (np.nan, np.nan, np.nan)
+    ranges = []
+    areas  = []
+    corrs  = []
+    for s,e in cycles:
+        l = L[s:e]; r = R[s:e]
+        # range
+        rL = float(np.nanmax(l) - np.nanmin(l)); rR = float(np.nanmax(r) - np.nanmin(r))
+        denom = max(rL, rR, 1e-12)
+        ranges.append((min(rL, rR) / denom))
+        # area (L2 energy)
+        aL = float(np.nansum((l - np.nanmean(l))**2))
+        aR = float(np.nansum((r - np.nanmean(r))**2))
+        denomA = max(aL, aR, 1e-12)
+        areas.append(min(aL, aR)/denomA)
+        # corr
+        if np.nanstd(l) < 1e-12 or np.nanstd(r) < 1e-12:
+            corrs.append(np.nan)
+        else:
+            lc = (l - np.nanmean(l)) / (np.nanstd(l) + 1e-12)
+            rc = (r - np.nanmean(r)) / (np.nanstd(r) + 1e-12)
+            c = float(np.nanmean(lc * rc))
+            corrs.append(max(-1.0, min(1.0, c)))
+    return (_clamp01(_nanmean0(ranges)),
+            _clamp01(_nanmean0(areas)),
+            max(-1.0, min(1.0, _nanmean0(corrs))))
+
+# ============== v2.5 Engine: analyze ==============
 def analyze(df: pd.DataFrame, adv: dict):
-    """
-    입력 df: time + (left/right 또는 total) + (선택) onset/offset.
-    adv: dict(baseline_s, k, M, W_ms, amp_frac)
-    반환: summary(DataFrame), per_cycle(빈), extras(dict: fps, n_cycles, viz)
-    """
-    # ---- 컬럼 매핑 ----
     cols = _norm_cols(df.columns.tolist())
     df.columns = cols
-
     def pick(key):
         for c in cols:
             if key in c: return c
         return None
-
     time_col   = pick("time")
     left_col   = pick("left")
     right_col  = pick("right")
@@ -249,35 +233,36 @@ def analyze(df: pd.DataFrame, adv: dict):
     left  = df[left_col].astype(float).values  if left_col  else None
     right = df[right_col].astype(float).values if right_col else None
 
-    # ---- fps ----
+    # fps
     dt = np.median(np.diff(t)) if len(t) > 1 else 0.0
     fps = (1.0 / dt) if dt > 0 else 1500.0
 
-    # ---- smoothing ----
+    # smoothing
     total_s = _smooth(total, fps)
     left_s  = _smooth(left, fps)  if left  is not None else None
     right_s = _smooth(right, fps) if right is not None else None
 
-    # ---- cycles ----
+    # cycles
     min_frames = max(int(0.002 * fps), 5)
     cycles = _build_cycles(t, total_s, min_frames=min_frames)
 
-    # ---- Metrics (AP/TP) ----
+    # core metrics
     AP, TP = _ap_tp(t, total_s, cycles)
+    AS_legacy = _as_legacy(left_s, right_s, cycles)
+    PS_dist, PS_sim = _ps_dist(left_s, right_s, t, cycles)
+    AS_range, AS_area, AS_corr = _as_range_area_corr(left_s, right_s, cycles)
 
-    # ---- 에너지/임계/히스테리시스 기반 VOnT/VOffT ----
+    # energy-based on/offset (v2.5 style)
     W_ms       = float(adv.get("W_ms", 35.0))
     baseline_s = float(adv.get("baseline_s", 0.06))
     k          = float(adv.get("k", 1.10))
     amp_frac   = float(adv.get("amp_frac", 0.70))
 
-    # 고정 규칙
     hysteresis_ratio = 0.70      # T_low = 0.7 * T_high
-    min_event_ms     = 40.0      # 디바운스: 최소 지속시간
-    refractory_ms    = 30.0      # 불응기간
+    min_event_ms     = 40.0      # debounce
+    refractory_ms    = 30.0      # refractory
 
     W = max(int(round((W_ms / 1000.0) * fps)), 3)
-
     def _energy(trace):
         return _moving_rms(np.abs(np.diff(trace, prepend=trace[0])), W)
 
@@ -287,7 +272,6 @@ def analyze(df: pd.DataFrame, adv: dict):
     E_on  = _energy(onset_series)
     E_off = _energy(offset_series)
 
-    # baseline 구간 통계 (평균 + k*표준편차)
     nB = max(int(round(baseline_s * fps)), 5)
     def _thr(E):
         base = E[:min(nB, len(E))]
@@ -296,11 +280,10 @@ def analyze(df: pd.DataFrame, adv: dict):
         Th  = mu0 + k * s0
         Tl  = hysteresis_ratio * Th
         return Th, Tl
-
     Th_on,  Tl_on  = _thr(E_on)
     Th_off, Tl_off = _thr(E_off)
 
-    def _hyst_detect(E, Th, Tl, polarity="rise"):
+    def _hyst_detect(E, Th, Tl):
         above = (E >= Th).astype(int)
         low   = (E >= Tl).astype(int)
         min_frames_ev = max(1, int(round((min_event_ms/1000.0) * fps)))
@@ -310,41 +293,33 @@ def analyze(df: pd.DataFrame, adv: dict):
         while i < N:
             if state == 0:
                 if i + min_frames_ev <= N and np.all(above[i:i+min_frames_ev] == 1):
-                    state = 1
-                    starts.append(i)
-                    i += min_frames_ev
-                    i += refr_frames
-                    continue
+                    state = 1; starts.append(i)
+                    i += min_frames_ev; i += refr_frames; continue
                 i += 1
             else:
                 if low[i] == 1:
                     i += 1
                 else:
-                    ends.append(i)
-                    state = 0
-                    i += refr_frames
+                    ends.append(i); state = 0; i += refr_frames
         return np.array(starts, int), np.array(ends, int)
 
-    on_starts, on_ends   = _hyst_detect(E_on,  Th_on,  Tl_on,  "rise")
-    off_starts, off_ends = _hyst_detect(E_off, Th_off, Tl_off, "fall")
+    on_starts, on_ends   = _hyst_detect(E_on,  Th_on,  Tl_on)
+    off_starts, off_ends = _hyst_detect(E_off, Th_off, Tl_off)
 
-    # 움직임 시작 i_move
     i_move = int(on_starts[0]) if len(on_starts) else (cycles[0][0] if len(cycles) else None)
 
-    VOnT = np.nan; VOffT = np.nan
-    i_steady = None; i_last = None; i_end = None
-
+    VOnT = np.nan
+    VOffT = np.nan
     if len(cycles) >= 1 and i_move is not None:
-        # 전역 진폭
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles])) if cycles else 0.0
-        # 첫 steady: move 이후 사이클에서 전역의 amp_frac 이상
+        # first steady after move
+        i_steady = None
         for s, e in cycles:
-            if s <= i_move:   # '<=' 가드
+            if s <= i_move:   # ensure after move
                 continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp <= 0 or (amp >= amp_frac * g_amp):
                 i_steady = int(s); break
-        # 최소 간격 4ms 보정
         MIN_VONT_GAP = int(round(0.004 * fps))
         if i_steady is not None and (i_steady - i_move) < MIN_VONT_GAP:
             for s, e in cycles:
@@ -352,25 +327,26 @@ def analyze(df: pd.DataFrame, adv: dict):
                     continue
                 amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
                 if g_amp <= 0 or (amp >= amp_frac * g_amp):
-                    i_steady = int(s)
-                    break
+                    i_steady = int(s); break
         if i_steady is None:
             i_steady = cycles[0][0] if cycles else i_move
-        # 마지막 steady
+
+        # last steady
+        i_last = None
         for s, e in reversed(cycles):
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp <= 0 or (amp >= amp_frac * g_amp):
                 i_last = int(s); break
         if i_last is None:
             i_last = cycles[-1][0] if cycles else (len(t)-1)
-        # 움직임 종료
+
+        # end
         idxs = np.where(off_ends >= i_last)[0] if len(off_ends) else []
         if len(idxs):
             i_end = int(off_ends[idxs[-1]])
         else:
             i_end = cycles[-1][1] if cycles else (len(t)-1)
 
-        # 시간 계산(ms)
         t_move   = float(t[i_move]) if i_move   is not None else np.nan
         t_steady = float(t[i_steady]) if i_steady is not None else np.nan
         t_last   = float(t[i_last]) if i_last   is not None else np.nan
@@ -378,18 +354,9 @@ def analyze(df: pd.DataFrame, adv: dict):
 
         VOnT  = (t_steady - t_move) * 1000.0 if (np.isfinite(t_steady) and np.isfinite(t_move)) else np.nan
         VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end) and np.isfinite(t_last)) else np.nan
+    else:
+        i_steady = None; i_last = None; i_end = None
 
-    # ---- AS/PS 보완 지표 계산 ----
-    # 기존 AS(평균 range) 계산 (과거 연속성 유지용)
-    AS_legacy = _as_range_median(left_s, right_s, cycles)
-
-    # 새 AS triplet (게인 정규화 포함)
-    AS_triplet = _compute_as_triplet(left_s, right_s, total_s, cycles, fps, amp_frac)
-
-    # 새 PS (circular) – sim(1=좋음)과 dist(0=정상,1=비정상) 병기
-    PS_sim, PS_dist = _ps_circular(left_s, right_s, t, cycles)
-
-    # summary
     summary = pd.DataFrame({
         "Parameter": [
             "Amplitude Periodicity (AP)",
@@ -403,36 +370,128 @@ def analyze(df: pd.DataFrame, adv: dict):
             "Voice Onset Time (VOnT, ms)",
             "Voice Offset Time (VOffT, ms)",
         ],
-        "Value": [AP, TP, AS_legacy, AS_triplet["AS_range"], AS_triplet["AS_area"], AS_triplet["AS_corr"], PS_sim, PS_dist, VOnT, VOffT]
+        "Value": [AP, TP, AS_legacy, AS_range, AS_area, AS_corr, PS_sim, PS_dist, VOnT, VOffT]
     })
-
-    per_cycle = pd.DataFrame(dict(cycle=[], start_time=[], end_time=[]))
 
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
         E_on=E_on, E_off=E_off,
         thr_on=Th_on, thr_off=Th_off,
         Tlow_on=Tl_on, Tlow_off=Tl_off,
-        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=(i_end if 'i_end' in locals() else None),
+        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=(locals().get("i_end", None)),
         cycles=cycles,
-        AS_triplet=AS_triplet,
-        PS_sim=PS_sim, PS_dist=PS_dist
+        AP=AP, TP=TP, AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
+        PS_sim=PS_sim, PS_dist=PS_dist, VOnT=VOnT, VOffT=VOffT
     )
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
-    return summary, per_cycle, extras
+    return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
 
-# ============== 사이드바 세팅 ==============
+# ============== Overview Renderer ==============
+DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT"]
+
+def _val(x, ndig=4):
+    try:
+        if x is None: return "N/A"
+        xf = float(x)
+        if np.isnan(xf) or np.isinf(xf):
+            return "N/A"
+        return f"{xf:.{ndig}f}"
+    except Exception:
+        return "N/A"
+
+def render_overview(env: dict, keys=None):
+    st.subheader("🩺 Overview")
+    AP       = env.get("AP")
+    TP       = env.get("TP")
+    PS_dist  = env.get("PS_dist")
+    AS_corr  = env.get("AS_corr")
+    AS_range = env.get("AS_range")
+    AS_area  = env.get("AS_area")
+    VOnT     = env.get("VOnT")
+    VOffT    = env.get("VOffT")
+    fps      = env.get("fps", np.nan)
+    ncyc     = int(env.get("ncyc", 0) or 0)
+
+    metrics = {
+        "AP":       _val(AP, 4),
+        "TP":       _val(TP, 4),
+        "PS_dist":  _val(PS_dist, 4),
+        "AS_corr":  _val(AS_corr, 4),
+        "AS_range": _val(AS_range, 4),
+        "AS_area":  _val(AS_area, 4),
+        "VOnT":     _val(VOnT, 2),
+        "VOffT":    _val(VOffT, 2),
+    }
+    labels = {
+        "AP":       "AP",
+        "TP":       "TP",
+        "PS_dist":  "PS_dist (0=정상)",
+        "AS_corr":  "AS_corr",
+        "AS_range": "AS_range",
+        "AS_area":  "AS_area",
+        "VOnT":     "VOnT (ms)",
+        "VOffT":    "VOffT (ms)",
+    }
+
+    if keys is None:
+        sel = st.multiselect("표시 항목", DEFAULT_KEYS,
+                             default=st.session_state.get("overview_keys", DEFAULT_KEYS))
+        st.session_state["overview_keys"] = sel
+        keys = sel
+    else:
+        st.session_state["overview_keys"] = keys
+
+    row1 = keys[:4]
+    row2 = keys[4:8]
+
+    c1 = st.columns(len(row1)) if row1 else []
+    for i,k in enumerate(row1):
+        with c1[i]:
+            st.metric(labels[k], metrics[k])
+    c2 = st.columns(len(row2)) if row2 else []
+    for i,k in enumerate(row2):
+        with c2[i]:
+            st.metric(labels[k], metrics[k])
+
+    qc = []
+    try:
+        if isinstance(PS_dist, (int,float)) and np.isfinite(PS_dist) and PS_dist > 0.08:
+            qc.append("PS_dist↑ (위상 불일치 가능)")
+        if isinstance(AP, (int,float)) and np.isfinite(AP) and AP < 0.70:
+            qc.append("AP 낮음 (진폭 불안정)")
+        if isinstance(TP, (int,float)) and np.isfinite(TP) and TP < 0.85:
+            qc.append("TP 낮음 (주기 불안정)")
+        if isinstance(VOnT, (int,float)) and np.isfinite(VOnT) and VOnT <= 0:
+            qc.append("VOnT≤0 (가드 재확인)")
+    except Exception:
+        pass
+
+    st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
+    if qc:
+        st.info("QC: " + " · ".join(qc))
+
+# ============== Sidebar Settings ==============
 with st.sidebar:
     st.markdown("### ⚙ Settings")
-    baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=0.06, step=0.01)
-    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00, value=1.10, step=0.10)
-    M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=40, step=1)
-    W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=40.0, value=35.0, step=1.0)
-    amp_frac   = st.slider("정상화 최소 진폭 비율", 0.10, 0.90, 0.70, 0.01)
+    prof = st.selectbox("분석 프로필", ["Normal", "ULP", "SD", "Custom"], index=0)
+    # defaults by profile
+    pmap = {
+        "Normal": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac=0.70),
+        "ULP":    dict(baseline_s=0.06, k=1.50, M=40, W_ms=35.0, amp_frac=0.60),
+        "SD":     dict(baseline_s=0.06, k=1.75, M=50, W_ms=40.0, amp_frac=0.75),
+        "Custom": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac=0.70),
+    }
+    base = pmap.get(prof, pmap["Normal"])
+    baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=float(base["baseline_s"]), step=0.01)
+    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00,  value=float(base["k"]), step=0.10)
+    M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=int(base["M"]), step=1)
+    W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=60.0,  value=float(base["W_ms"]), step=1.0)
+    amp_frac   = st.slider("정상화 최소 진폭 비율", 0.10, 0.90, float(base["amp_frac"]), 0.01)
+    st.caption("프로필은 기본값을 로드만 하며, 개별 슬라이더로 즉시 미세 조정할 수 있습니다.")
 
 adv = dict(baseline_s=baseline_s, k=k, M=M, W_ms=W_ms, amp_frac=amp_frac)
 
-# ============== 파일 업로드 ==============
+# ============== File Upload ==============
 uploaded = st.file_uploader("CSV 또는 XLSX 파일을 업로드하세요", type=["csv", "xlsx"])
 if uploaded is None:
     st.info("⬆️ 분석할 파일을 업로드하세요.")
@@ -443,10 +502,9 @@ if uploaded.name.endswith(".csv"):
 else:
     df = pd.read_excel(uploaded)
 
-# ============== 분석 실행 ==============
+# ============== Run analysis ==============
 summary, per_cycle, extras = analyze(df, adv)
 viz = extras.get("viz", {})
-
 t         = viz.get("t", None)
 total_s   = viz.get("total_s", None)
 left_s    = viz.get("left_s", None)
@@ -462,40 +520,24 @@ i_steady  = viz.get("i_steady", None)
 i_last    = viz.get("i_last", None)
 i_end     = viz.get("i_end", None)
 cycles    = viz.get("cycles", [])
-AS_triplet= viz.get("AS_triplet", {})
-PS_sim    = viz.get("PS_sim", np.nan)
-PS_dist   = viz.get("PS_dist", np.nan)
+AP = viz.get("AP"); TP = viz.get("TP"); AS_legacy = viz.get("AS_legacy")
+AS_range = viz.get("AS_range"); AS_area = viz.get("AS_area"); AS_corr = viz.get("AS_corr")
+PS_sim = viz.get("PS_sim"); PS_dist = viz.get("PS_dist"); VOnT = viz.get("VOnT"); VOffT = viz.get("VOffT")
+fps  = float(extras.get("fps", np.nan))
+ncyc = int(extras.get("n_cycles", 0))
 
-# 값 추출 헬퍼
-_def_get = lambda key, default=np.nan: float(summary.loc[summary["Parameter"] == key, "Value"].iloc[0]) if (key in summary["Parameter"].values) else default
-
-AP    = _def_get("Amplitude Periodicity (AP)")
-TP    = _def_get("Time Periodicity (TP)")
-AS_lg = _def_get("AS (legacy, median p2p)")
-AS_rg = _def_get("AS_range (robust)")
-AS_ar = _def_get("AS_area (energy)")
-AS_co = _def_get("AS_corr (shape)")
-VOnT  = _def_get("Voice Onset Time (VOnT, ms)")
-VOffT = _def_get("Voice Offset Time (VOffT, ms)")
-fps   = float(extras.get("fps", np.nan))
-ncyc  = int(extras.get("n_cycles", 0))
-
-# ============== 그래프 빌더 ==============
-
+# ============== Plots ==============
 def make_total_plot(show_cycles=True, show_markers=True, zoom="전체"):
     fig = go.Figure()
     if t is None or total_s is None:
         fig.update_layout(template="simple_white", height=360)
         return fig
-
     fig.add_trace(go.Scatter(x=t, y=total_s, mode="lines",
                              line=dict(color=COLOR_TOTAL, width=2.2),
                              name="Total (smoothed)"))
-
     if show_cycles and cycles:
         for s, e in cycles[:120]:
             fig.add_vrect(x0=t[s], x1=t[e], fillcolor=COLOR_BAND, opacity=0.08, line_width=0)
-
     if show_markers:
         for idx, col, label in [
             (i_move,   COLOR_MOVE,   "move"),
@@ -508,52 +550,39 @@ def make_total_plot(show_cycles=True, show_markers=True, zoom="전체"):
                 fig.add_vline(x=xval, line=dict(color=col, dash="dot", width=1.6))
                 fig.add_annotation(x=xval, y=float(np.nanmax(total_s)), text=label,
                                    showarrow=False, font=dict(size=10, color=col), yshift=14)
-
     if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
     elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
-
-    fig.update_layout(
-        title="Total Signal with Detected Events",
-        xaxis_title="Time (s)", yaxis_title="Gray Level (a.u.)",
-        template="simple_white", height=380,
-        legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
-    )
+    fig.update_layout(title="Total Signal with Detected Events",
+                      xaxis_title="Time (s)", yaxis_title="Gray Level (a.u.)",
+                      template="simple_white", height=380,
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
     return fig
-
 
 def make_lr_plot(normalize=False, zoom="전체"):
     fig = go.Figure()
     if t is None or (left_s is None and right_s is None):
         fig.update_layout(template="simple_white", height=340)
         return fig
-
     def _norm(x):
         if x is None: return None
         mn, mx = np.nanmin(x), np.nanmax(x)
         return (x - mn) / (mx - mn + 1e-12)
-
     L = _norm(left_s) if normalize else left_s
     R = _norm(right_s) if normalize else right_s
-
     if L is not None:
         fig.add_trace(go.Scatter(x=t, y=L, name="Left",
                                  mode="lines", line=dict(color=COLOR_LEFT, width=2.0)))
     if R is not None:
         fig.add_trace(go.Scatter(x=t, y=R, name="Right",
                                  mode="lines", line=dict(color=COLOR_RIGHT, width=2.0, dash="dot")))
-
     if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
     elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
-
-    fig.update_layout(
-        title=f"Left vs Right (AS_range {AS_rg if np.isfinite(AS_rg) else np.nan:.2f} · PS_dist {PS_dist if np.isfinite(PS_dist) else np.nan:.2f})",
-        xaxis_title="Time (s)",
-        yaxis_title=("Normalized" if normalize else "Gray Level (a.u.)"),
-        template="simple_white", height=340,
-        legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
-    )
+    fig.update_layout(title=f"Left vs Right (AS_range {AS_range:.2f} · AS_corr {AS_corr:.2f})",
+                      xaxis_title="Time (s)",
+                      yaxis_title=("Normalized" if normalize else "Gray Level (a.u.)"),
+                      template="simple_white", height=340,
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
     return fig
-
 
 def make_energy_plot(mode="on", show_markers=True, zoom="전체"):
     fig = go.Figure()
@@ -564,7 +593,6 @@ def make_energy_plot(mode="on", show_markers=True, zoom="전체"):
         E, Th, Tl, color, label, event_idx = E_on, thr_on, Tlow_on, COLOR_CRIMSON, "Onset", i_move
     else:
         E, Th, Tl, color, label, event_idx = E_off, thr_off, Tlow_off, COLOR_ROYAL, "Offset", i_end
-
     if E is not None:
         fig.add_trace(go.Scatter(x=t, y=E, name=f"E_{label.lower()}",
                                  mode="lines", line=dict(color=color, width=2.0)))
@@ -574,50 +602,35 @@ def make_energy_plot(mode="on", show_markers=True, zoom="전체"):
     if Tl is not None:
         fig.add_hline(y=float(Tl), line=dict(color=color, dash="dot", width=1.2),
                       annotation_text=f"Tlow_{label.lower()}", annotation_position="bottom left")
-
     if show_markers and event_idx is not None and 0 <= int(event_idx) < len(t):
         xval = t[int(event_idx)]
         fig.add_vline(x=xval, line=dict(color=color, dash="dot", width=1.6))
         if E is not None:
             fig.add_annotation(x=xval, y=float(np.nanmax(E)), text=f"{label} @ {xval*1000.0:.2f} ms",
                                showarrow=False, font=dict(size=10, color=color), yshift=14)
-
     if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
     elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
-
-    fig.update_layout(
-        title=f"Energy & Thresholds – {label}",
-        xaxis_title="Time (s)", yaxis_title="Energy (a.u.)",
-        template="simple_white", height=320,
-        legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
-    )
+    fig.update_layout(title=f"Energy & Thresholds – {label}",
+                      xaxis_title="Time (s)", yaxis_title="Energy (a.u.)",
+                      template="simple_white", height=320,
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
     return fig
 
-# ============== 탭 ==============
+# ============== Tabs ==============
 tab1, tab2, tab3 = st.tabs(["Overview", "Visualization", "Validation"])
 
 with tab1:
-    st.subheader("🩺 Overview")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("AP", f"{AP:.4f}")
-    c2.metric("TP", f"{TP:.4f}")
-    c3.metric("PS_dist (0=정상)", f"{PS_dist:.4f}")
-
-    c4, c5, c6 = st.columns(3)
-    c4.metric("AS_range", f"{AS_rg:.4f}")
-    c5.metric("AS_area", f"{AS_ar:.4f}")
-    c6.metric("AS_corr", f"{AS_co:.4f}")
-
-    st.caption(f"FPS: {fps:.1f} | 검출된 사이클 수: {ncyc}")
+    env = dict(AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
+               AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=fps, ncyc=ncyc)
+    render_overview(env)
     st.dataframe(summary, use_container_width=True)
 
 with tab2:
-    st.subheader("📈 Visualization")
     cc1, cc2, cc3, cc4, cc5 = st.columns(5)
     show_cycles   = cc1.checkbox("Cycle 밴드 표시", True)
     show_markers  = cc2.checkbox("이벤트 마커 표시", True)
     zoom_preset   = cc3.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"])
-    normalize_lr  = cc4.checkbox("좌/우 정규화 시각화", False)
+    normalize_lr  = cc4.checkbox("좌/우 정규화", False)
     energy_mode   = cc5.radio("에너지 뷰", ["Onset", "Offset"], horizontal=True)
 
     st.markdown("#### A) Total")
@@ -631,6 +644,5 @@ with tab2:
                                      show_markers, zoom_preset), use_container_width=True)
 
 with tab3:
-    st.subheader("📊 Validation (참고)")
-    st.info("v3.1에서 Batch Validation & RMSE 집계가 확장됩니다. (AS/PS 보완 지표 포함)")
-
+    st.subheader("📊 Validation (RMSE / MAE / Bias)")
+    st.info("자동 vs 수동 측정치 정량검증은 다음 업데이트에서 확장됩니다. (배치 집계, Bias 히스토그램 포함)")
