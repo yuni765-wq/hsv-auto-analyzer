@@ -594,7 +594,7 @@ def make_energy_plot(mode="on", show_markers=True, zoom="전체"):
     return fig
 
 # ============== 탭 ==============
- tab1, tab2, tab3 = st.tabs(["Overview", "Visualization", "Validation"])
+tab1, tab2, tab3 = st.tabs(["Overview", "Visualization", "Validation"])
 
 with tab1:
     st.subheader("🩺 Overview")
@@ -633,3 +633,4 @@ with tab2:
 with tab3:
     st.subheader("📊 Validation (참고)")
     st.info("v3.1에서 Batch Validation & RMSE 집계가 확장됩니다. (AS/PS 보완 지표 포함)")
+
