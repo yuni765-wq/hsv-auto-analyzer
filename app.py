@@ -1,6 +1,6 @@
 
 # ---------------------------------------------------------------
-# HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged)
+# HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged, Single File)
 # Isaka × Lian – app_v3alpha_overview_fix.py
 # 실행: streamlit run app_v3alpha_overview_fix.py
 # 요구: streamlit, plotly, pandas, numpy, (optional) scipy
@@ -22,7 +22,7 @@ except Exception:
 st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine",
                    layout="wide")
 st.title("HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged)")
-st.caption("Isaka × Lian | v2.5 engine + v3 PS/AS metrics + Overview fix")
+st.caption("Isaka × Lian | v2.5 energy + v3 PS/AS metrics + DualDetector(On/Off 분리)")
 
 # ============== Colors ==============
 COLOR_TOTAL   = "#FF0000"
@@ -35,6 +35,151 @@ COLOR_MOVE    = "#800080"
 COLOR_STEADY  = "#00A36C"
 COLOR_LAST    = "#FFA500"
 COLOR_END     = "#FF0000"
+COLOR_AUTOON  = "#8B008B"
+COLOR_AUTOOFF = "#1E90FF"
+
+# ===============================================================
+# 0) DualDetector — Onset/Offset 분리 상태기계 (내장 버전)
+# ===============================================================
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
+
+@dataclass
+class OnsetConfig:
+    theta: float = 0.50
+    min_amp_frac: float = 0.58
+    AP_min: float = 0.85
+    TP_min: float = 0.90
+    AS_corr_min: float = 0.95
+    PS_dist_max: float = 0.05
+    sustain_frames: int = 5  # frames
+
+@dataclass
+class OffsetConfig:
+    AS_corr_max: float = 0.90
+    PS_dist_min: float = 0.08
+    AP_max: float = 0.85
+    TP_max: float = 0.90
+    main_sustain_frames: int = 60   # ~40ms at 0.66ms/frame
+    aux_sustain_frames: int = 30    # ~20ms at 0.66ms/frame
+    debounce_frames: int = 15       # ~10ms at 0.66ms/frame
+    hysteresis_delta: float = 0.10  # optional
+
+@dataclass
+class DetectorConfig:
+    frame_ms: float = 0.66
+    onset: OnsetConfig = OnsetConfig()
+    offset: OffsetConfig = OffsetConfig()
+
+class DualDetector:
+    def __init__(self, cfg: DetectorConfig):
+        self.cfg = cfg
+
+    def detect(self, feats: Dict[str, np.ndarray]) -> Dict[str, Any]:
+        t = feats["t_ms"].astype(float)
+        A = feats["A_norm"].astype(float)
+        AP = feats["AP"].astype(float)
+        TP = feats["TP"].astype(float)
+        AS = feats["AS_corr"].astype(float)
+        PS = feats["PS_dist"].astype(float)
+
+        N = len(t)
+        on_cnt = 0
+        main_cnt = 0
+        aux_cnt = 0
+        on_time: Optional[float] = None
+        off_time: Optional[float] = None
+        off_idx_candidate: Optional[int] = None
+
+        oc = self.cfg.onset
+        fc = self.cfg.offset
+
+        state = "PRE_ONSET"
+
+        def main_flag(i: int) -> bool:
+            return (AS[i] < fc.AS_corr_max) or (PS[i] > fc.PS_dist_min)
+
+        def debounce_ok(k: int) -> bool:
+            L = min(fc.debounce_frames, N - k)
+            if L <= 0:
+                return False
+            for j in range(k, k+L):
+                if not main_flag(j):
+                    return False
+            return True
+
+        for i in range(N):
+            # Onset
+            on_flag = (
+                (A[i] >= oc.theta) and
+                (A[i] >= oc.min_amp_frac) and
+                (AP[i] >= oc.AP_min) and
+                (TP[i] >= oc.TP_min) and
+                (AS[i] >= oc.AS_corr_min) and
+                (PS[i] <= oc.PS_dist_max)
+            )
+            on_cnt = on_cnt + 1 if on_flag else 0
+
+            # Offset
+            f_main = main_flag(i)
+            f_aux = (AP[i] < fc.AP_max) or (TP[i] < fc.TP_max)
+            main_cnt = main_cnt + 1 if f_main else 0
+            aux_cnt  = aux_cnt  + 1 if f_aux  else 0
+
+            if state == "PRE_ONSET":
+                if on_cnt >= oc.sustain_frames:
+                    on_time = t[i]
+                    state = "VOICED"
+
+            elif state == "VOICED":
+                # (옵션) A_norm 히스테리시스는 필요 시 추가
+                if (main_cnt >= fc.main_sustain_frames) and (aux_cnt >= fc.aux_sustain_frames):
+                    if off_idx_candidate is None:
+                        off_idx_candidate = i
+                    if debounce_ok(off_idx_candidate):
+                        off_time = t[off_idx_candidate]
+                        state = "POST_OFFSET"
+                        break
+
+        # Fallbacks
+        if on_time is None and N > 0:
+            on_time = float(t[0])
+        if off_time is None and N > 0:
+            last = N - 1
+            back = max(0, last - int(round(100.0 / max(1e-9, self.cfg.frame_ms))))
+            k_pick = None
+            for k in range(last, back, -1):
+                fm = (AS[k] < fc.AS_corr_max) or (PS[k] > fc.PS_dist_min)
+                fa = (AP[k] < fc.AP_max) or (TP[k] < fc.TP_max)
+                if fm and fa:
+                    k_pick = k
+                    break
+            if k_pick is not None:
+                off_time = float(t[k_pick])
+            else:
+                off_time = float(max(0.0, t[last] - 10.0))
+
+        duration_ms = None
+        if (on_time is not None) and (off_time is not None):
+            duration_ms = float(off_time - on_time)
+
+        return {
+            "onset_time_ms": float(on_time) if on_time is not None else None,
+            "offset_time_ms": float(off_time) if off_time is not None else None,
+            "duration_ms": duration_ms,
+            "diagnostics": {
+                "state": state,
+                "on_cnt_last": on_cnt,
+                "main_cnt_last": main_cnt,
+                "aux_cnt_last": aux_cnt,
+                "off_idx_candidate": off_idx_candidate,
+                "cfg": {
+                    "frame_ms": self.cfg.frame_ms,
+                    "onset": self.cfg.onset.__dict__,
+                    "offset": self.cfg.offset.__dict__
+                },
+            },
+        }
 
 # ============== Utils ==============
 def _norm_cols(cols):
@@ -62,7 +207,6 @@ def _smooth(signal: np.ndarray, fps: float) -> np.ndarray:
             return savgol_filter(signal.astype(float), window_length=win, polyorder=3, mode="interp")
         except Exception:
             pass
-    # fallback: moving average
     pad = win // 2
     xx = np.pad(signal.astype(float), (pad, pad), mode="edge")
     ker = np.ones(win) / float(win)
@@ -131,7 +275,6 @@ def _as_legacy(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
     return _clamp01(_nanmean0(ratios))
 
 def _ps_dist(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> tuple:
-    """Phase distance (0=good). Also returns PS_sim=1-PS_dist."""
     if left is None or right is None or len(cycles) < 1:
         return (np.nan, np.nan)
     dists = []
@@ -142,7 +285,7 @@ def _ps_dist(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -
         if Ti <= 0: 
             continue
         dt = abs(float(t[li] - t[ri]))
-        d = min(dt, Ti - dt) / Ti  # circular wrap
+        d = min(dt, Ti - dt) / Ti
         dists.append(min(1.0, d))
     if not len(dists): 
         return (np.nan, np.nan)
@@ -150,10 +293,8 @@ def _ps_dist(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -
     return dist, _clamp01(1.0 - dist)
 
 def _as_gain_normalize(left: np.ndarray, right: np.ndarray, cycles: list):
-    """Return normalized L,R based on steady cycles median gain (robust)."""
     if left is None or right is None or len(cycles) < 1:
         return None, None
-    # collect per-cycle p2p
     p2pL, p2pR = [], []
     for s,e in cycles:
         p2pL.append(float(np.nanmax(left[s:e]) - np.nanmin(left[s:e])))
@@ -167,7 +308,6 @@ def _as_gain_normalize(left: np.ndarray, right: np.ndarray, cycles: list):
     return L, R
 
 def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tuple:
-    """AS_range (robust), AS_area (energy), AS_corr (shape)"""
     if left is None or right is None or len(cycles) < 1:
         return (np.nan, np.nan, np.nan)
     L, R = _as_gain_normalize(left, right, cycles)
@@ -178,16 +318,13 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
     corrs  = []
     for s,e in cycles:
         l = L[s:e]; r = R[s:e]
-        # range
         rL = float(np.nanmax(l) - np.nanmin(l)); rR = float(np.nanmax(r) - np.nanmin(r))
         denom = max(rL, rR, 1e-12)
         ranges.append((min(rL, rR) / denom))
-        # area (L2 energy)
         aL = float(np.nansum((l - np.nanmean(l))**2))
         aR = float(np.nansum((r - np.nanmean(r))**2))
         denomA = max(aL, aR, 1e-12)
         areas.append(min(aL, aR)/denomA)
-        # corr
         if np.nanstd(l) < 1e-12 or np.nanstd(r) < 1e-12:
             corrs.append(np.nan)
         else:
@@ -199,7 +336,7 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
             _clamp01(_nanmean0(areas)),
             max(-1.0, min(1.0, _nanmean0(corrs))))
 
-# ============== v2.5 Engine: analyze ==============
+# ============== v2.5 Energy-based On/Off (기존) ==============
 def analyze(df: pd.DataFrame, adv: dict):
     cols = _norm_cols(df.columns.tolist())
     df.columns = cols
@@ -258,9 +395,9 @@ def analyze(df: pd.DataFrame, adv: dict):
     k          = float(adv.get("k", 1.10))
     amp_frac   = float(adv.get("amp_frac", 0.70))
 
-    hysteresis_ratio = 0.70      # T_low = 0.7 * T_high
-    min_event_ms     = 40.0      # debounce
-    refractory_ms    = 30.0      # refractory
+    hysteresis_ratio = 0.70
+    min_event_ms     = 40.0
+    refractory_ms    = 30.0
 
     W = max(int(round((W_ms / 1000.0) * fps)), 3)
     def _energy(trace):
@@ -387,7 +524,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
 
 # ============== Overview Renderer ==============
-DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT"]
+DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT","Auto_On_ms","Auto_Off_ms","Auto_Dur_ms"]
 
 def _val(x, ndig=4):
     try:
@@ -401,80 +538,50 @@ def _val(x, ndig=4):
 
 def render_overview(env: dict, keys=None):
     st.subheader("🩺 Overview")
-    AP       = env.get("AP")
-    TP       = env.get("TP")
-    PS_dist  = env.get("PS_dist")
-    AS_corr  = env.get("AS_corr")
-    AS_range = env.get("AS_range")
-    AS_area  = env.get("AS_area")
-    VOnT     = env.get("VOnT")
-    VOffT    = env.get("VOffT")
-    fps      = env.get("fps", np.nan)
-    ncyc     = int(env.get("ncyc", 0) or 0)
-
-    metrics = {
-        "AP":       _val(AP, 4),
-        "TP":       _val(TP, 4),
-        "PS_dist":  _val(PS_dist, 4),
-        "AS_corr":  _val(AS_corr, 4),
-        "AS_range": _val(AS_range, 4),
-        "AS_area":  _val(AS_area, 4),
-        "VOnT":     _val(VOnT, 2),
-        "VOffT":    _val(VOffT, 2),
-    }
+    metrics = {k: _val(env.get(k), 4 if "ms" not in k else 2) for k in env.keys()}
     labels = {
-        "AP":       "AP",
-        "TP":       "TP",
-        "PS_dist":  "PS_dist (0=정상)",
-        "AS_corr":  "AS_corr",
-        "AS_range": "AS_range",
-        "AS_area":  "AS_area",
-        "VOnT":     "VOnT (ms)",
-        "VOffT":    "VOffT (ms)",
+        "AP":"AP","TP":"TP","PS_dist":"PS_dist (0=정상)","AS_corr":"AS_corr",
+        "AS_range":"AS_range","AS_area":"AS_area",
+        "VOnT":"VOnT (ms)","VOffT":"VOffT (ms)",
+        "Auto_On_ms":"Auto On (ms)","Auto_Off_ms":"Auto Off (ms)","Auto_Dur_ms":"Auto Duration (ms)",
     }
 
     if keys is None:
-        sel = st.multiselect("표시 항목", DEFAULT_KEYS,
-                             default=st.session_state.get("overview_keys", DEFAULT_KEYS))
+        default = st.session_state.get("overview_keys", DEFAULT_KEYS)
+        sel = st.multiselect("표시 항목", DEFAULT_KEYS, default=default)
         st.session_state["overview_keys"] = sel
         keys = sel
     else:
         st.session_state["overview_keys"] = keys
 
-    row1 = keys[:4]
-    row2 = keys[4:8]
+    row1 = keys[:4]; row2 = keys[4:8]; row3 = keys[8:12]
 
-    c1 = st.columns(len(row1)) if row1 else []
-    for i,k in enumerate(row1):
-        with c1[i]:
-            st.metric(labels[k], metrics[k])
-    c2 = st.columns(len(row2)) if row2 else []
-    for i,k in enumerate(row2):
-        with c2[i]:
-            st.metric(labels[k], metrics[k])
+    for row in (row1, row2, row3):
+        cols = st.columns(len(row)) if row else []
+        for i,k in enumerate(row):
+            with cols[i]:
+                st.metric(labels.get(k, k), metrics.get(k, "N/A"))
 
+    fps   = env.get("fps", np.nan)
+    ncyc  = int(env.get("ncyc", 0) or 0)
     qc = []
     try:
-        if isinstance(PS_dist, (int,float)) and np.isfinite(PS_dist) and PS_dist > 0.08:
+        if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") > 0.08:
             qc.append("PS_dist↑ (위상 불일치 가능)")
-        if isinstance(AP, (int,float)) and np.isfinite(AP) and AP < 0.70:
+        if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")) and env.get("AP") < 0.70:
             qc.append("AP 낮음 (진폭 불안정)")
-        if isinstance(TP, (int,float)) and np.isfinite(TP) and TP < 0.85:
+        if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")) and env.get("TP") < 0.85:
             qc.append("TP 낮음 (주기 불안정)")
-        if isinstance(VOnT, (int,float)) and np.isfinite(VOnT) and VOnT <= 0:
-            qc.append("VOnT≤0 (가드 재확인)")
     except Exception:
         pass
-
     st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
     if qc:
         st.info("QC: " + " · ".join(qc))
 
 # ============== Sidebar Settings ==============
 with st.sidebar:
-    st.markdown("### ⚙ Settings")
+    st.markdown("### ⚙ Profile & Energy (기존 엔진)")
     prof = st.selectbox("분석 프로필", ["Normal", "ULP", "SD", "Custom"], index=0)
-    # defaults by profile
     pmap = {
         "Normal": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac=0.70),
         "ULP":    dict(baseline_s=0.06, k=1.50, M=40, W_ms=35.0, amp_frac=0.60),
@@ -489,6 +596,28 @@ with st.sidebar:
     amp_frac   = st.slider("정상화 최소 진폭 비율", 0.10, 0.90, float(base["amp_frac"]), 0.01)
     st.caption("프로필은 기본값을 로드만 하며, 개별 슬라이더로 즉시 미세 조정할 수 있습니다.")
 
+    st.markdown("---")
+    st.markdown("### 🧲 DualDetector 설정 (Onset / Offset 별도)")
+    frame_ms = st.number_input("프레임 간격(ms)", min_value=0.10, max_value=5.0, value=0.66, step=0.01)
+
+    st.markdown("**Onset 설정**")
+    onset_theta = st.slider("θ_on (A_norm)", 0.10, 0.90, 0.50, 0.01)
+    onset_min_amp = st.slider("min_amp_frac", 0.10, 0.90, 0.58, 0.01)
+    onset_AP_min = st.slider("AP_min", 0.50, 1.00, 0.85, 0.01)
+    onset_TP_min = st.slider("TP_min", 0.50, 1.00, 0.90, 0.01)
+    onset_AS_min = st.slider("AS_corr_min", 0.50, 1.00, 0.95, 0.01)
+    onset_PS_max = st.slider("PS_dist_max", 0.00, 0.20, 0.05, 0.01)
+    onset_sustain = st.number_input("onset_sustain (frames)", min_value=1, max_value=60, value=5, step=1)
+
+    st.markdown("**Offset 설정**")
+    offset_AS_max = st.slider("AS_corr_max", 0.50, 1.00, 0.90, 0.01)
+    offset_PS_min = st.slider("PS_dist_min", 0.00, 0.20, 0.08, 0.01)
+    offset_AP_max = st.slider("AP_max", 0.50, 1.00, 0.85, 0.01)
+    offset_TP_max = st.slider("TP_max", 0.50, 1.00, 0.90, 0.01)
+    offset_main_sus = st.number_input("main_sustain (frames)", min_value=1, max_value=200, value=60, step=1)
+    offset_aux_sus  = st.number_input("aux_sustain (frames)",  min_value=1, max_value=200, value=30, step=1)
+    offset_debounce = st.number_input("debounce (frames)",     min_value=0, max_value=60,  value=15, step=1)
+
 adv = dict(baseline_s=baseline_s, k=k, M=M, W_ms=W_ms, amp_frac=amp_frac)
 
 # ============== File Upload ==============
@@ -502,7 +631,7 @@ if uploaded.name.endswith(".csv"):
 else:
     df = pd.read_excel(uploaded)
 
-# ============== Run analysis ==============
+# ============== Run analysis (기존) ==============
 summary, per_cycle, extras = analyze(df, adv)
 viz = extras.get("viz", {})
 t         = viz.get("t", None)
@@ -526,8 +655,47 @@ PS_sim = viz.get("PS_sim"); PS_dist = viz.get("PS_dist"); VOnT = viz.get("VOnT")
 fps  = float(extras.get("fps", np.nan))
 ncyc = int(extras.get("n_cycles", 0))
 
+# ============== DualDetector 실행을 위한 특징 구성 ==============
+# A_norm: total_s를 [0,1]로 정규화 (스테디 최대 진폭 기반이 이상적이나, 우선 전체 max-min 사용)
+if total_s is not None and len(total_s):
+    mn, mx = float(np.nanmin(total_s)), float(np.nanmax(total_s))
+    denom = (mx - mn) if (mx - mn) > 1e-12 else 1.0
+    A_norm = (total_s - mn) / denom
+else:
+    A_norm = np.zeros_like(total_s) if total_s is not None else np.array([])
+
+# DualDetector 구성
+on_cfg = OnsetConfig(theta=onset_theta, min_amp_frac=onset_min_amp,
+                     AP_min=onset_AP_min, TP_min=onset_TP_min,
+                     AS_corr_min=onset_AS_min, PS_dist_max=onset_PS_max,
+                     sustain_frames=int(onset_sustain))
+off_cfg = OffsetConfig(AS_corr_max=offset_AS_max, PS_dist_min=offset_PS_min,
+                       AP_max=offset_AP_max, TP_max=offset_TP_max,
+                       main_sustain_frames=int(offset_main_sus),
+                       aux_sustain_frames=int(offset_aux_sus),
+                       debounce_frames=int(offset_debounce))
+
+det_cfg = DetectorConfig(frame_ms=frame_ms, onset=on_cfg, offset=off_cfg)
+det = DualDetector(det_cfg)
+
+# 필요한 특징(AS_corr, PS_dist, AP, TP)은 이미 위에서 계산됨
+feats = {
+    "t_ms": (t * 1000.0) if (t is not None) else np.array([]),
+    "A_norm": A_norm if A_norm is not None else np.array([]),
+    "AP": np.repeat(AP if np.isfinite(AP) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
+    "TP": np.repeat(TP if np.isfinite(TP) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
+    "AS_corr": np.repeat(AS_corr if np.isfinite(AS_corr) else 1.0, len(A_norm)) if len(A_norm) else np.array([]),
+    "PS_dist": np.repeat(PS_dist if np.isfinite(PS_dist) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
+}
+
+det_res = det.detect(feats) if len(feats["t_ms"]) else {"onset_time_ms": None, "offset_time_ms": None, "duration_ms": None}
+
+Auto_On_ms  = det_res.get("onset_time_ms")
+Auto_Off_ms = det_res.get("offset_time_ms")
+Auto_Dur_ms = det_res.get("duration_ms")
+
 # ============== Plots ==============
-def make_total_plot(show_cycles=True, show_markers=True, zoom="전체"):
+def make_total_plot(show_cycles=True, show_markers=True, show_auto=True, zoom="전체"):
     fig = go.Figure()
     if t is None or total_s is None:
         fig.update_layout(template="simple_white", height=360)
@@ -550,11 +718,22 @@ def make_total_plot(show_cycles=True, show_markers=True, zoom="전체"):
                 fig.add_vline(x=xval, line=dict(color=col, dash="dot", width=1.6))
                 fig.add_annotation(x=xval, y=float(np.nanmax(total_s)), text=label,
                                    showarrow=False, font=dict(size=10, color=col), yshift=14)
+    if show_auto:
+        if isinstance(Auto_On_ms, (int,float)) and np.isfinite(Auto_On_ms):
+            xon = Auto_On_ms / 1000.0
+            fig.add_vline(x=xon, line=dict(color=COLOR_AUTOON, dash="dash", width=1.8))
+            fig.add_annotation(x=xon, y=float(np.nanmax(total_s)), text=f"Auto On {Auto_On_ms:.1f} ms",
+                               showarrow=False, font=dict(size=10, color=COLOR_AUTOON), yshift=28)
+        if isinstance(Auto_Off_ms, (int,float)) and np.isfinite(Auto_Off_ms):
+            xoff = Auto_Off_ms / 1000.0
+            fig.add_vline(x=xoff, line=dict(color=COLOR_AUTOOFF, dash="dash", width=1.8))
+            fig.add_annotation(x=xoff, y=float(np.nanmax(total_s)), text=f"Auto Off {Auto_Off_ms:.1f} ms",
+                               showarrow=False, font=dict(size=10, color=COLOR_AUTOOFF), yshift=42)
     if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
     elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
     fig.update_layout(title="Total Signal with Detected Events",
                       xaxis_title="Time (s)", yaxis_title="Gray Level (a.u.)",
-                      template="simple_white", height=380,
+                      template="simple_white", height=420,
                       legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
     return fig
 
@@ -620,21 +799,25 @@ def make_energy_plot(mode="on", show_markers=True, zoom="전체"):
 tab1, tab2, tab3 = st.tabs(["Overview", "Visualization", "Validation"])
 
 with tab1:
-    env = dict(AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
-               AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=fps, ncyc=ncyc)
+    env = dict(
+        AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
+        AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
+        Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
+    )
     render_overview(env)
     st.dataframe(summary, use_container_width=True)
 
 with tab2:
-    cc1, cc2, cc3, cc4, cc5 = st.columns(5)
+    cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
     show_cycles   = cc1.checkbox("Cycle 밴드 표시", True)
     show_markers  = cc2.checkbox("이벤트 마커 표시", True)
-    zoom_preset   = cc3.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"])
-    normalize_lr  = cc4.checkbox("좌/우 정규화", False)
-    energy_mode   = cc5.radio("에너지 뷰", ["Onset", "Offset"], horizontal=True)
+    show_auto     = cc3.checkbox("Auto On/Off 표시", True)
+    zoom_preset   = cc4.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"])
+    normalize_lr  = cc5.checkbox("좌/우 정규화", False)
+    energy_mode   = cc6.radio("에너지 뷰", ["Onset", "Offset"], horizontal=True)
 
     st.markdown("#### A) Total")
-    st.plotly_chart(make_total_plot(show_cycles, show_markers, zoom_preset), use_container_width=True)
+    st.plotly_chart(make_total_plot(show_cycles, show_markers, show_auto, zoom_preset), use_container_width=True)
 
     st.markdown("#### B) Left vs Right")
     st.plotly_chart(make_lr_plot(normalize_lr, zoom_preset), use_container_width=True)
