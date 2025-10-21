@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------
 # HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged, Single File)
-# Isaka × Lian – app_v3alpha_overview_fix.py  (v2.5 → v3alpha+offset-batch)
-# 실행: streamlit run app.py
+# Isaka × Lian – app_v3alpha_full.py
+# 실행: streamlit run app_v3alpha_full.py
 # 요구: streamlit, plotly, pandas, numpy, (optional) scipy
 # ---------------------------------------------------------------
 
@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
 
 # optional savgol
 try:
@@ -23,7 +22,7 @@ except Exception:
 st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine",
                    layout="wide")
 st.title("HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged)")
-st.caption("Isaka × Lian | v2.5 energy + v3 PS/AS metrics + DualDetector(On/Off 분리) + Offset Batch Analysis")
+st.caption("Isaka × Lian | v2.5 energy + v3 PS/AS metrics + DualDetector(On/Off 분리) + Offset Batch Analysis + Onset Fallback")
 
 # ============== Colors ==============
 COLOR_TOTAL   = "#FF0000"
@@ -40,7 +39,7 @@ COLOR_AUTOON  = "#8B008B"
 COLOR_AUTOOFF = "#1E90FF"
 
 # ===============================================================
-# 0) DualDetector — Onset/Offset 분리 상태기계 (내장 버전)
+# 0) DualDetector — Onset/Offset 분리 상태기계 (게이트 유연화 + 온셋 폴백)
 # ===============================================================
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
@@ -49,10 +48,10 @@ from typing import Dict, Any, Optional
 class OnsetConfig:
     theta: float = 0.50
     min_amp_frac: float = 0.58
-    AP_min: float = 0.85
-    TP_min: float = 0.90
-    AS_corr_min: float = 0.95
-    PS_dist_max: float = 0.05
+    AP_min: Optional[float] = 0.85
+    TP_min: Optional[float] = 0.90
+    AS_corr_min: Optional[float] = 0.95
+    PS_dist_max: Optional[float] = 0.05
     sustain_frames: int = 5  # frames
 
 @dataclass
@@ -83,6 +82,7 @@ class DualDetector:
         TP = feats["TP"].astype(float)
         AS = feats["AS_corr"].astype(float)
         PS = feats["PS_dist"].astype(float)
+        fallback_on_ms = feats.get("fallback_on_ms", None)
 
         N = len(t)
         on_cnt = 0
@@ -96,6 +96,11 @@ class DualDetector:
         fc = self.cfg.offset
 
         state = "PRE_ONSET"
+
+        def _ok_ge(x, thr):  # 게이트 유연화: None이면 무시
+            return True if thr is None else (x >= thr)
+        def _ok_le(x, thr):
+            return True if thr is None else (x <= thr)
 
         def main_flag(i: int) -> bool:
             return (AS[i] < fc.AS_corr_max) or (PS[i] > fc.PS_dist_min)
@@ -114,10 +119,10 @@ class DualDetector:
             on_flag = (
                 (A[i] >= oc.theta) and
                 (A[i] >= oc.min_amp_frac) and
-                (AP[i] >= oc.AP_min) and
-                (TP[i] >= oc.TP_min) and
-                (AS[i] >= oc.AS_corr_min) and
-                (PS[i] <= oc.PS_dist_max)
+                _ok_ge(AP[i], oc.AP_min) and
+                _ok_ge(TP[i], oc.TP_min) and
+                _ok_ge(AS[i], oc.AS_corr_min) and
+                _ok_le(PS[i], oc.PS_dist_max)
             )
             on_cnt = on_cnt + 1 if on_flag else 0
 
@@ -143,7 +148,10 @@ class DualDetector:
 
         # Fallbacks
         if on_time is None and N > 0:
-            on_time = float(t[0])
+            if fallback_on_ms is not None and np.isfinite(fallback_on_ms):
+                on_time = float(fallback_on_ms)
+            else:
+                on_time = float(t[0])
         if off_time is None and N > 0:
             last = N - 1
             back = max(0, last - int(round(100.0 / max(1e-9, self.cfg.frame_ms))))
@@ -167,18 +175,6 @@ class DualDetector:
             "onset_time_ms": float(on_time) if on_time is not None else None,
             "offset_time_ms": float(off_time) if off_time is not None else None,
             "duration_ms": duration_ms,
-            "diagnostics": {
-                "state": state,
-                "on_cnt_last": on_cnt,
-                "main_cnt_last": main_cnt,
-                "aux_cnt_last": aux_cnt,
-                "off_idx_candidate": off_idx_candidate,
-                "cfg": {
-                    "frame_ms": self.cfg.frame_ms,
-                    "onset": self.cfg.onset.__dict__,
-                    "offset": self.cfg.offset.__dict__
-                },
-            },
         }
 
 # ============== Utils ==============
@@ -226,7 +222,7 @@ def _build_cycles(t: np.ndarray, signal: np.ndarray, min_frames: int = 5) -> lis
     if len(peaks) < 2:
         return cycles
     for i in range(len(peaks) - 1):
-        s, e = int(peaks[i]), int(peaks[i + 1])
+        s = int(peaks[i]); e = int(peaks[i + 1])
         if (e - s) >= max(2, min_frames):
             cycles.append((s, e))
     return cycles
@@ -282,12 +278,12 @@ def _ps_dist(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -
         li = s + int(np.nanargmax(left[s:e]))
         ri = s + int(np.nanargmax(right[s:e]))
         Ti = float(t[e] - t[s]) if (t is not None) else 1.0
-        if Ti <= 0:
+        if Ti <= 0: 
             continue
         dt = abs(float(t[li] - t[ri]))
         d = min(dt, Ti - dt) / Ti
         dists.append(min(1.0, d))
-    if not len(dists):
+    if not len(dists): 
         return (np.nan, np.nan)
     dist = _clamp01(_nanmean0(dists))
     return dist, _clamp01(1.0 - dist)
@@ -303,7 +299,8 @@ def _as_gain_normalize(left: np.ndarray, right: np.ndarray, cycles: list):
     gR = np.nanmedian(p2pR) if len(p2pR) else np.nan
     if not (np.isfinite(gL) and np.isfinite(gR)) or (gL <= 0 or gR <= 0):
         return left, right
-    L = left / (gL + 1e-12); R = right / (gR + 1e-12)
+    L = left / (gL + 1e-12)
+    R = right / (gR + 1e-12)
     return L, R
 
 def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tuple:
@@ -312,7 +309,9 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
     L, R = _as_gain_normalize(left, right, cycles)
     if L is None or R is None:
         return (np.nan, np.nan, np.nan)
-    ranges, areas, corrs = [], [], []
+    ranges = []
+    areas  = []
+    corrs  = []
     for s,e in cycles:
         l = L[s:e]; r = R[s:e]
         rL = float(np.nanmax(l) - np.nanmin(l)); rR = float(np.nanmax(r) - np.nanmin(r))
@@ -327,7 +326,8 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
         else:
             lc = (l - np.nanmean(l)) / (np.nanstd(l) + 1e-12)
             rc = (r - np.nanmean(r)) / (np.nanstd(r) + 1e-12)
-            corrs.append(max(-1.0, min(1.0, float(np.nanmean(lc * rc)))))
+            c = float(np.nanmean(lc * rc))
+            corrs.append(max(-1.0, min(1.0, c)))
     return (_clamp01(_nanmean0(ranges)),
             _clamp01(_nanmean0(areas)),
             max(-1.0, min(1.0, _nanmean0(corrs))))
@@ -601,8 +601,6 @@ with st.sidebar:
     else:
         amp_frac_off = st.slider("Offset용 amp_frac_off", 0.10, 0.90, float(base["amp_frac"]), 0.01)
 
-    st.caption("프로필은 기본값 로드만 하며, 위 슬라이더로 즉시 미세 조정할 수 있습니다.")
-
     st.markdown("---")
     st.markdown("### 🧲 DualDetector 설정 (Onset / Offset 별도)")
     frame_ms = st.number_input("프레임 간격(ms)", min_value=0.10, max_value=5.0, value=0.66, step=0.01)
@@ -610,20 +608,24 @@ with st.sidebar:
     st.markdown("**Onset 설정**")
     onset_theta = st.slider("θ_on (A_norm)", 0.10, 0.90, 0.50, 0.01)
     onset_min_amp = st.slider("min_amp_frac", 0.10, 0.90, 0.58, 0.01)
-    onset_AP_min = st.slider("AP_min", 0.50, 1.00, 0.85, 0.01)
-    onset_TP_min = st.slider("TP_min", 0.50, 1.00, 0.90, 0.01)
-    onset_AS_min = st.slider("AS_corr_min", 0.50, 1.00, 0.95, 0.01)
-    onset_PS_max = st.slider("PS_dist_max", 0.00, 0.20, 0.05, 0.01)
+    onset_AP_min = st.slider("AP_min", 0.00, 1.00, 0.85, 0.01)  # 0.0까지 내리면 무효처럼 작동
+    onset_TP_min = st.slider("TP_min", 0.00, 1.00, 0.90, 0.01)
+    onset_AS_min = st.slider("AS_corr_min", 0.00, 1.00, 0.95, 0.01)
+    onset_PS_max = st.slider("PS_dist_max", 0.00, 1.00, 0.05, 0.01)
     onset_sustain = st.number_input("onset_sustain (frames)", min_value=1, max_value=60, value=5, step=1)
 
     st.markdown("**Offset 설정**")
     offset_AS_max = st.slider("AS_corr_max", 0.50, 1.00, 0.90, 0.01)
-    offset_PS_min = st.slider("PS_dist_min", 0.00, 0.20, 0.08, 0.01)
+    offset_PS_min = st.slider("PS_dist_min", 0.00, 0.50, 0.08, 0.01)
     offset_AP_max = st.slider("AP_max", 0.50, 1.00, 0.85, 0.01)
     offset_TP_max = st.slider("TP_max", 0.50, 1.00, 0.90, 0.01)
     offset_main_sus = st.number_input("main_sustain (frames)", min_value=1, max_value=200, value=60, step=1)
     offset_aux_sus  = st.number_input("aux_sustain (frames)",  min_value=1, max_value=200, value=30, step=1)
     offset_debounce = st.number_input("debounce (frames)",     min_value=0, max_value=60,  value=15, step=1)
+
+    st.markdown("---")
+    use_energy_onset_fallback = st.checkbox("에너지 온셋 폴백 사용", value=True)
+    st.caption("게이트가 안 열릴 때, 에너지 기반 시작점(i_move)을 Auto On으로 사용합니다.")
 
 adv = dict(
     baseline_s=baseline_s, k=k, M=M, W_ms=W_ms,
@@ -698,13 +700,20 @@ det_cfg = DetectorConfig(frame_ms=frame_ms, onset=on_cfg, offset=off_cfg)
 det = DualDetector(det_cfg)
 
 # 필요한 특징(AS_corr, PS_dist, AP, TP)은 개별 케이스 수준에서는 스칼라 → 길이 반복으로 사용
+fallback_on_ms = None
+if use_energy_onset_fallback and (t is not None) and (i_move is not None):
+    _i = int(i_move)
+    if 0 <= _i < len(t):
+        fallback_on_ms = float(t[_i] * 1000.0)
+
 feats = {
-    "t_ms": (np.array(viz.get("t")) * 1000.0) if uploaded is not None and viz.get("t") is not None else np.array([]),
+    "t_ms": (np.array(t) * 1000.0) if uploaded is not None and t is not None else np.array([]),
     "A_norm": A_norm if uploaded is not None else np.array([]),
     "AP": np.repeat(AP if np.isfinite(AP) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
     "TP": np.repeat(TP if np.isfinite(TP) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
     "AS_corr": np.repeat(AS_corr if np.isfinite(AS_corr) else 1.0, len(A_norm)) if len(A_norm) else np.array([]),
     "PS_dist": np.repeat(PS_dist if np.isfinite(PS_dist) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
+    "fallback_on_ms": fallback_on_ms,
 }
 det_res = det.detect(feats) if len(feats["t_ms"]) else {"onset_time_ms": None, "offset_time_ms": None, "duration_ms": None}
 Auto_On_ms  = det_res.get("onset_time_ms")
