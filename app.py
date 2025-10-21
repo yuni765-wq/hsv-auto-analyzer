@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------
 # HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Merged, Single File)
 # Isaka × Lian – app_v3alpha_overview_fix.py
-# 실행: streamlit run app_v3alpha_overview_fix.py
+# 실행: streamlit run app.py
 # 요구: streamlit, plotly, pandas, numpy, (optional) scipy
 # ---------------------------------------------------------------
 
@@ -41,7 +41,7 @@ COLOR_AUTOOFF = "#1E90FF"
 # ===============================================================
 # 0) DualDetector — Onset/Offset 분리 상태기계 (내장 버전)
 # ===============================================================
-from dataclasses import dataclass
+from dataclasses import dataclass, fiekd
 from typing import Dict, Any, Optional
 
 @dataclass
