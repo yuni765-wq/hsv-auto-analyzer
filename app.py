@@ -41,8 +41,9 @@ COLOR_AUTOOFF = "#1E90FF"
 # ===============================================================
 # 0) DualDetector — Onset/Offset 분리 상태기계 (내장 버전)
 # ===============================================================
-from dataclasses import dataclass, fiekd
+from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
+import numpy as np
 
 @dataclass
 class OnsetConfig:
@@ -60,16 +61,16 @@ class OffsetConfig:
     PS_dist_min: float = 0.08
     AP_max: float = 0.85
     TP_max: float = 0.90
-    main_sustain_frames: int = 60   # ~40ms at 0.66ms/frame
-    aux_sustain_frames: int = 30    # ~20ms at 0.66ms/frame
-    debounce_frames: int = 15       # ~10ms at 0.66ms/frame
-    hysteresis_delta: float = 0.10  # optional
+    main_sustain_frames: int = 60
+    aux_sustain_frames: int = 30
+    debounce_frames: int = 15
+    hysteresis_delta: float = 0.10
 
 @dataclass
 class DetectorConfig:
     frame_ms: float = 0.66
-    onset: OnsetConfig = OnsetConfig()
-    offset: OffsetConfig = OffsetConfig()
+    onset: OnsetConfig = field(default_factory=OnsetConfig)
+    offset: OffsetConfig = field(default_factory=OffsetConfig)
 
 class DualDetector:
     def __init__(self, cfg: DetectorConfig):
