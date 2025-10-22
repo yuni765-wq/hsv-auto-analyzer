@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------
-# HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Full + Param Tab)
+# HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Full)
 # Isaka × Lian – app_v3alpha_full.py
 # 실행: streamlit run app_v3alpha_full.py
 # 요구: streamlit, plotly, pandas, numpy, (optional) scipy
@@ -10,31 +10,26 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
-from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
-from datetime import datetime
 
-# optional scipy (signal, stats)
+try:
+    from scipy import stats
+    _HAS_SCIPY = True
+except Exception:
+    _HAS_SCIPY = False
+
 try:
     from scipy.signal import savgol_filter
     _HAS_SAVGOL = True
 except Exception:
     _HAS_SAVGOL = False
 
-try:
-    from scipy import stats as _spstats
-    _HAS_SPSTATS = True
-except Exception:
-    _HAS_SPSTATS = False
-
 # ---------------- UI ----------------
-st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine",
+st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Full)",
                    layout="wide")
 st.title("HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Full)")
 st.caption("Isaka × Lian | v2.5 energy + v3 PS/AS metrics + DualDetector(On/Off 분리) + Parameter Comparison(누적)")
 
-# ============== Colors ==============
+# ---------------- Colors ----------------
 COLOR_TOTAL   = "#FF0000"
 COLOR_LEFT    = "#0066FF"
 COLOR_RIGHT   = "#00AA00"
@@ -49,8 +44,11 @@ COLOR_AUTOON  = "#8B008B"
 COLOR_AUTOOFF = "#1E90FF"
 
 # ===============================================================
-# 0) DualDetector — Onset/Offset 분리 상태기계 (내장 버전)
+# 0) DualDetector — Onset/Offset 분리 상태기계 (메트릭/스위치용)
 # ===============================================================
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+
 @dataclass
 class OnsetConfig:
     theta: float = 0.50
@@ -59,7 +57,7 @@ class OnsetConfig:
     TP_min: float = 0.90
     AS_corr_min: float = 0.95
     PS_dist_max: float = 0.05
-    sustain_frames: int = 5  # frames
+    sustain_frames: int = 5
 
 @dataclass
 class OffsetConfig:
@@ -100,7 +98,6 @@ class DualDetector:
 
         oc = self.cfg.onset
         fc = self.cfg.offset
-
         state = "PRE_ONSET"
 
         def main_flag(i: int) -> bool:
@@ -108,15 +105,12 @@ class DualDetector:
 
         def debounce_ok(k: int) -> bool:
             L = min(fc.debounce_frames, N - k)
-            if L <= 0:
-                return False
+            if L <= 0: return False
             for j in range(k, k+L):
-                if not main_flag(j):
-                    return False
+                if not main_flag(j): return False
             return True
 
         for i in range(N):
-            # Onset
             on_flag = (
                 (A[i] >= oc.theta) and
                 (A[i] >= oc.min_amp_frac) and
@@ -127,9 +121,8 @@ class DualDetector:
             )
             on_cnt = on_cnt + 1 if on_flag else 0
 
-            # Offset
             f_main = main_flag(i)
-            f_aux = (AP[i] < fc.AP_max) or (TP[i] < fc.TP_max)
+            f_aux  = (AP[i] < fc.AP_max) or (TP[i] < fc.TP_max)
             main_cnt = main_cnt + 1 if f_main else 0
             aux_cnt  = aux_cnt  + 1 if f_aux  else 0
 
@@ -137,7 +130,6 @@ class DualDetector:
                 if on_cnt >= oc.sustain_frames:
                     on_time = t[i]
                     state = "VOICED"
-
             elif state == "VOICED":
                 if (main_cnt >= fc.main_sustain_frames) and (aux_cnt >= fc.aux_sustain_frames):
                     if off_idx_candidate is None:
@@ -147,7 +139,6 @@ class DualDetector:
                         state = "POST_OFFSET"
                         break
 
-        # Fallbacks
         if on_time is None and N > 0:
             on_time = float(t[0])
         if off_time is None and N > 0:
@@ -160,10 +151,7 @@ class DualDetector:
                 if fm and fa:
                     k_pick = k
                     break
-            if k_pick is not None:
-                off_time = float(t[k_pick])
-            else:
-                off_time = float(max(0.0, t[last] - 10.0))
+            off_time = float(t[k_pick]) if k_pick is not None else float(max(0.0, t[last] - 10.0))
 
         duration_ms = None
         if (on_time is not None) and (off_time is not None):
@@ -173,29 +161,14 @@ class DualDetector:
             "onset_time_ms": float(on_time) if on_time is not None else None,
             "offset_time_ms": float(off_time) if off_time is not None else None,
             "duration_ms": duration_ms,
-            "diagnostics": {
-                "state": state,
-                "on_cnt_last": on_cnt,
-                "main_cnt_last": main_cnt,
-                "aux_cnt_last": aux_cnt,
-                "off_idx_candidate": off_idx_candidate,
-                "cfg": {
-                    "frame_ms": self.cfg.frame_ms,
-                    "onset": self.cfg.onset.__dict__,
-                    "offset": self.cfg.offset.__dict__
-                },
-            },
         }
 
-# ============== Utils ==============
-def _norm_cols(cols):
-    return [c.lower().strip().replace(" ", "_") for c in cols]
+# ---------------- Utils ----------------
+def _norm_cols(cols): return [c.lower().strip().replace(" ", "_") for c in cols]
 
 def _moving_rms(x: np.ndarray, w: int) -> np.ndarray:
-    if w is None or w <= 1:
-        return np.sqrt(np.maximum(x * x, 0.0))
-    w = int(w)
-    pad = w // 2
+    if w is None or w <= 1: return np.sqrt(np.maximum(x * x, 0.0))
+    w = int(w); pad = w // 2
     xx = np.pad(x.astype(float), (pad, pad), mode="edge")
     ker = np.ones(w) / float(w)
     m2 = np.convolve(xx * xx, ker, mode="valid")
@@ -203,9 +176,8 @@ def _moving_rms(x: np.ndarray, w: int) -> np.ndarray:
 
 def _smooth(signal: np.ndarray, fps: float) -> np.ndarray:
     n = len(signal)
-    if n < 7:
-        return signal.astype(float)
-    base_w = int(max(7, min(21, round(fps * 0.007))))  # ~7ms 근처
+    if n < 7: return signal.astype(float)
+    base_w = int(max(7, min(21, round(fps * 0.007))))
     win = base_w if (base_w % 2 == 1) else base_w + 1
     win = min(win, n - 1) if n % 2 == 0 and win >= n else min(win, n - (1 - (n % 2)))
     if _HAS_SAVGOL:
@@ -219,8 +191,7 @@ def _smooth(signal: np.ndarray, fps: float) -> np.ndarray:
     return np.convolve(xx, ker, mode="valid")
 
 def _detect_peaks(y: np.ndarray) -> np.ndarray:
-    if len(y) < 3:
-        return np.array([], dtype=int)
+    if len(y) < 3: return np.array([], dtype=int)
     y1 = y[1:] - y[:-1]
     s = np.sign(y1)
     idx = np.where((s[:-1] > 0) & (s[1:] <= 0))[0] + 1
@@ -229,12 +200,10 @@ def _detect_peaks(y: np.ndarray) -> np.ndarray:
 def _build_cycles(t: np.ndarray, signal: np.ndarray, min_frames: int = 5) -> list:
     peaks = _detect_peaks(signal)
     cycles = []
-    if len(peaks) < 2:
-        return cycles
+    if len(peaks) < 2: return cycles
     for i in range(len(peaks) - 1):
         s = int(peaks[i]); e = int(peaks[i + 1])
-        if (e - s) >= max(2, min_frames):
-            cycles.append((s, e))
+        if (e - s) >= max(2, min_frames): cycles.append((s, e))
     return cycles
 
 def _clamp01(x):
@@ -245,24 +214,20 @@ def _nanmean0(x):
     v = np.nanmean(x) if len(x) else np.nan
     return 0.0 if (v is None or np.isnan(v)) else float(v)
 
-# ============== v3 Metrics ==============
+# ---------------- v3 Metrics ----------------
 def _ap_tp(t: np.ndarray, total: np.ndarray, cycles: list) -> tuple:
-    if len(cycles) < 3:
-        return (np.nan, np.nan)
+    if len(cycles) < 3: return (np.nan, np.nan)
     amps, periods = [], []
     for s, e in cycles:
         seg = total[s:e]
         amp = float(np.nanmax(seg) - np.nanmin(seg))
         Ti = float(t[e] - t[s])
-        amps.append(amp)
-        periods.append(max(Ti, 1e-9))
+        amps.append(amp); periods.append(max(Ti, 1e-9))
     amps = np.array(amps, float); periods = np.array(periods, float)
 
     def _periodicity(v):
-        m = np.nanmean(v)
-        s = np.nanstd(v, ddof=1) if len(v) > 1 else 0.0
-        if not np.isfinite(m) or m <= 0:
-            return np.nan
+        m = np.nanmean(v); s = np.nanstd(v, ddof=1) if len(v) > 1 else 0.0
+        if not np.isfinite(m) or m <= 0: return np.nan
         return _clamp01(1.0 - (s / m))
 
     TP = _periodicity(periods)
@@ -270,8 +235,7 @@ def _ap_tp(t: np.ndarray, total: np.ndarray, cycles: list) -> tuple:
     return (AP, TP)
 
 def _as_legacy(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
-    if left is None or right is None or len(cycles) < 1:
-        return np.nan
+    if left is None or right is None or len(cycles) < 1: return np.nan
     ratios = []
     for s, e in cycles:
         L = float(np.nanmax(left[s:e]) - np.nanmin(left[s:e]))
@@ -281,47 +245,37 @@ def _as_legacy(left: np.ndarray, right: np.ndarray, cycles: list) -> float:
     return _clamp01(_nanmean0(ratios))
 
 def _ps_dist(left: np.ndarray, right: np.ndarray, t: np.ndarray, cycles: list) -> tuple:
-    if left is None or right is None or len(cycles) < 1:
-        return (np.nan, np.nan)
+    if left is None or right is None or len(cycles) < 1: return (np.nan, np.nan)
     dists = []
     for s, e in cycles:
         li = s + int(np.nanargmax(left[s:e]))
         ri = s + int(np.nanargmax(right[s:e]))
         Ti = float(t[e] - t[s]) if (t is not None) else 1.0
-        if Ti <= 0: 
-            continue
+        if Ti <= 0: continue
         dt = abs(float(t[li] - t[ri]))
         d = min(dt, Ti - dt) / Ti
         dists.append(min(1.0, d))
-    if not len(dists): 
-        return (np.nan, np.nan)
+    if not len(dists): return (np.nan, np.nan)
     dist = _clamp01(_nanmean0(dists))
     return dist, _clamp01(1.0 - dist)
 
 def _as_gain_normalize(left: np.ndarray, right: np.ndarray, cycles: list):
-    if left is None or right is None or len(cycles) < 1:
-        return None, None
+    if left is None or right is None or len(cycles) < 1: return None, None
     p2pL, p2pR = [], []
     for s,e in cycles:
         p2pL.append(float(np.nanmax(left[s:e]) - np.nanmin(left[s:e])))
         p2pR.append(float(np.nanmax(right[s:e]) - np.nanmin(right[s:e])))
     gL = np.nanmedian(p2pL) if len(p2pL) else np.nan
     gR = np.nanmedian(p2pR) if len(p2pR) else np.nan
-    if not (np.isfinite(gL) and np.isfinite(gR)) or (gL <= 0 or gR <= 0):
-        return left, right
-    L = left / (gL + 1e-12)
-    R = right / (gR + 1e-12)
+    if not (np.isfinite(gL) and np.isfinite(gR)) or (gL <= 0 or gR <= 0): return left, right
+    L = left / (gL + 1e-12); R = right / (gR + 1e-12)
     return L, R
 
 def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tuple:
-    if left is None or right is None or len(cycles) < 1:
-        return (np.nan, np.nan, np.nan)
+    if left is None or right is None or len(cycles) < 1: return (np.nan, np.nan, np.nan)
     L, R = _as_gain_normalize(left, right, cycles)
-    if L is None or R is None:
-        return (np.nan, np.nan, np.nan)
-    ranges = []
-    areas  = []
-    corrs  = []
+    if L is None or R is None: return (np.nan, np.nan, np.nan)
+    ranges, areas, corrs = [], [], []
     for s,e in cycles:
         l = L[s:e]; r = R[s:e]
         rL = float(np.nanmax(l) - np.nanmin(l)); rR = float(np.nanmax(r) - np.nanmin(r))
@@ -331,8 +285,7 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
         aR = float(np.nansum((r - np.nanmean(r))**2))
         denomA = max(aL, aR, 1e-12)
         areas.append(min(aL, aR)/denomA)
-        if np.nanstd(l) < 1e-12 or np.nanstd(r) < 1e-12:
-            corrs.append(np.nan)
+        if np.nanstd(l) < 1e-12 or np.nanstd(r) < 1e-12: corrs.append(np.nan)
         else:
             lc = (l - np.nanmean(l)) / (np.nanstd(l) + 1e-12)
             rc = (r - np.nanmean(r)) / (np.nanstd(r) + 1e-12)
@@ -342,10 +295,11 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
             _clamp01(_nanmean0(areas)),
             max(-1.0, min(1.0, _nanmean0(corrs))))
 
-# ============== v2.5 Energy-based On/Off (기존) ==============
-def analyze(df: pd.DataFrame, adv: dict):
-    cols = _norm_cols(df.columns.tolist())
-    df.columns = cols
+# ---------------- v2.5 Energy + On/Off Steady Logic ----------------
+def analyze(df: pd.DataFrame, amp_frac_on: float, amp_frac_off_fixed: float = 0.80,
+            baseline_s: float = 0.06, k: float = 1.10, W_ms: float = 35.0):
+
+    cols = _norm_cols(df.columns.tolist()); df.columns = cols
     def pick(key):
         for c in cols:
             if key in c: return c
@@ -376,42 +330,26 @@ def analyze(df: pd.DataFrame, adv: dict):
     left  = df[left_col].astype(float).values  if left_col  else None
     right = df[right_col].astype(float).values if right_col else None
 
-    # fps
     dt = np.median(np.diff(t)) if len(t) > 1 else 0.0
     fps = (1.0 / dt) if dt > 0 else 1500.0
 
-    # smoothing
     total_s = _smooth(total, fps)
     left_s  = _smooth(left, fps)  if left  is not None else None
     right_s = _smooth(right, fps) if right is not None else None
 
-    # cycles
     min_frames = max(int(0.002 * fps), 5)
     cycles = _build_cycles(t, total_s, min_frames=min_frames)
 
-    # core metrics
     AP, TP = _ap_tp(t, total_s, cycles)
     AS_legacy = _as_legacy(left_s, right_s, cycles)
     PS_dist, PS_sim = _ps_dist(left_s, right_s, t, cycles)
     AS_range, AS_area, AS_corr = _as_range_area_corr(left_s, right_s, cycles)
 
-    # energy-based on/offset (v2.5 style)
-    W_ms       = float(adv.get("W_ms", 35.0))
-    baseline_s = float(adv.get("baseline_s", 0.06))
-    k          = float(adv.get("k", 1.10))
-    amp_frac   = float(adv.get("amp_frac", 0.70))  # NOTE: onset/offset 공용 기본값(Offset 전용 0.80은 DualDetector로 고정)
-
-    hysteresis_ratio = 0.70
-    min_event_ms     = 40.0
-    refractory_ms    = 30.0
-
+    # Energy envelopes for markers (on/off)
     W = max(int(round((W_ms / 1000.0) * fps)), 3)
-    def _energy(trace):
-        return _moving_rms(np.abs(np.diff(trace, prepend=trace[0])), W)
-
+    def _energy(trace): return _moving_rms(np.abs(np.diff(trace, prepend=trace[0])), W)
     onset_series  = df[onset_col].astype(float).values  if onset_col  else total_s
     offset_series = df[offset_col].astype(float).values if offset_col else total_s
-
     E_on  = _energy(onset_series)
     E_off = _energy(offset_series)
 
@@ -421,7 +359,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         mu0 = float(np.mean(base)) if len(base) else 0.0
         s0  = float(np.std(base, ddof=1)) if len(base) > 1 else 0.0
         Th  = mu0 + k * s0
-        Tl  = hysteresis_ratio * Th
+        Tl  = 0.70 * Th
         return Th, Tl
     Th_on,  Tl_on  = _thr(E_on)
     Th_off, Tl_off = _thr(E_off)
@@ -429,6 +367,8 @@ def analyze(df: pd.DataFrame, adv: dict):
     def _hyst_detect(E, Th, Tl):
         above = (E >= Th).astype(int)
         low   = (E >= Tl).astype(int)
+        min_event_ms  = 40.0
+        refractory_ms = 30.0
         min_frames_ev = max(1, int(round((min_event_ms/1000.0) * fps)))
         refr_frames   = max(1, int(round((refractory_ms/1000.0) * fps)))
         starts, ends = [], []
@@ -451,44 +391,33 @@ def analyze(df: pd.DataFrame, adv: dict):
 
     i_move = int(on_starts[0]) if len(on_starts) else (cycles[0][0] if len(cycles) else None)
 
-    VOnT = np.nan
-    VOffT = np.nan
+    # ------- Steady/Last 구간: Onset/Offset amp_frac 분리 핵심 -------
+    VOnT = np.nan; VOffT = np.nan
+    i_steady = None; i_last = None; i_end = None
     if len(cycles) >= 1 and i_move is not None:
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles])) if cycles else 0.0
-        # first steady after move
-        i_steady = None
+
+        # 첫 스테디 (Onset 측정용) - amp_frac_on 사용
         for s, e in cycles:
-            if s <= i_move:   # ensure after move
+            if s <= i_move:  # after move
                 continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
-            if g_amp <= 0 or (amp >= amp_frac * g_amp):
+            if g_amp <= 0 or (amp >= amp_frac_on * g_amp):
                 i_steady = int(s); break
-        MIN_VONT_GAP = int(round(0.004 * fps))
-        if i_steady is not None and (i_steady - i_move) < MIN_VONT_GAP:
-            for s, e in cycles:
-                if s <= i_move + MIN_VONT_GAP:
-                    continue
-                amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
-                if g_amp <= 0 or (amp >= amp_frac * g_amp):
-                    i_steady = int(s); break
         if i_steady is None:
             i_steady = cycles[0][0] if cycles else i_move
 
-        # last steady
-        i_last = None
+        # 마지막 스테디 (Offset 측정용) - amp_frac_off_fixed=0.80 고정
         for s, e in reversed(cycles):
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
-            if g_amp <= 0 or (amp >= amp_frac * g_amp):
+            if g_amp <= 0 or (amp >= amp_frac_off_fixed * g_amp):
                 i_last = int(s); break
         if i_last is None:
             i_last = cycles[-1][0] if cycles else (len(t)-1)
 
-        # end
+        # end 선택
         idxs = np.where(off_ends >= i_last)[0] if len(off_ends) else []
-        if len(idxs):
-            i_end = int(off_ends[idxs[-1]])
-        else:
-            i_end = cycles[-1][1] if cycles else (len(t)-1)
+        i_end = int(off_ends[idxs[-1]]) if len(idxs) else (cycles[-1][1] if cycles else (len(t)-1))
 
         t_move   = float(t[i_move]) if i_move   is not None else np.nan
         t_steady = float(t[i_steady]) if i_steady is not None else np.nan
@@ -497,8 +426,6 @@ def analyze(df: pd.DataFrame, adv: dict):
 
         VOnT  = (t_steady - t_move) * 1000.0 if (np.isfinite(t_steady) and np.isfinite(t_move)) else np.nan
         VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end) and np.isfinite(t_last)) else np.nan
-    else:
-        i_steady = None; i_last = None; i_end = None
 
     summary = pd.DataFrame({
         "Parameter": [
@@ -518,124 +445,55 @@ def analyze(df: pd.DataFrame, adv: dict):
 
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
-        E_on=E_on, E_off=E_off,
-        thr_on=Th_on, thr_off=Th_off,
-        Tlow_on=Tl_on, Tlow_off=Tl_off,
-        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=(locals().get("i_end", None)),
+        E_on=E_on, E_off=E_off, thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
+        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
         cycles=cycles,
         AP=AP, TP=TP, AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist, VOnT=VOnT, VOffT=VOffT
     )
-    extras = dict(fps=float(fps), n_cycles=int(len(cycles)), viz=viz)
+    extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
 
-# ============== Overview Renderer ==============
-DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT","Auto_On_ms","Auto_Off_ms","Auto_Dur_ms"]
-
-def _val(x, ndig=4):
-    try:
-        if x is None: return "N/A"
-        xf = float(x)
-        if np.isnan(xf) or np.isinf(xf):
-            return "N/A"
-        return f"{xf:.{ndig}f}"
-    except Exception:
-        return "N/A"
-
-def render_overview(env: dict, keys=None):
-    st.subheader("🩺 Overview")
-    metrics = {k: _val(env.get(k), 4 if "ms" not in k else 2) for k in env.keys()}
-    labels = {
-        "AP":"AP","TP":"TP","PS_dist":"PS_dist (0=정상)","AS_corr":"AS_corr",
-        "AS_range":"AS_range","AS_area":"AS_area",
-        "VOnT":"VOnT (ms)","VOffT":"VOffT (ms)",
-        "Auto_On_ms":"Auto On (ms)","Auto_Off_ms":"Auto Off (ms)","Auto_Dur_ms":"Auto Duration (ms)",
-    }
-
-    if keys is None:
-        default = st.session_state.get("overview_keys", DEFAULT_KEYS)
-        sel = st.multiselect("표시 항목", DEFAULT_KEYS, default=default)
-        st.session_state["overview_keys"] = sel
-        keys = sel
-    else:
-        st.session_state["overview_keys"] = keys
-
-    row1 = keys[:4]; row2 = keys[4:8]; row3 = keys[8:12]
-
-    for row in (row1, row2, row3):
-        cols = st.columns(len(row)) if row else []
-        for i,k in enumerate(row):
-            with cols[i]:
-                st.metric(labels.get(k, k), metrics.get(k, "N/A"))
-
-    fps   = env.get("fps", np.nan)
-    ncyc  = int(env.get("ncyc", 0) or 0)
-    qc = []
-    try:
-        if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") > 0.08:
-            qc.append("PS_dist↑ (위상 불일치 가능)")
-        if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")) and env.get("AP") < 0.70:
-            qc.append("AP 낮음 (진폭 불안정)")
-        if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")) and env.get("TP") < 0.85:
-            qc.append("TP 낮음 (주기 불안정)")
-    except Exception:
-        pass
-    st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
-    if qc:
-        st.info("QC: " + " · ".join(qc))
-
-# ============== Sidebar Settings ==============
+# ---------------- Sidebar ----------------
 with st.sidebar:
     st.markdown("### ⚙ Profile & Energy (기존 엔진)")
     prof = st.selectbox("분석 프로필", ["Normal", "ULP", "SD", "Custom"], index=0)
     pmap = {
-        "Normal": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac=0.70),
-        "ULP":    dict(baseline_s=0.06, k=1.50, M=40, W_ms=35.0, amp_frac=0.60),
-        "SD":     dict(baseline_s=0.06, k=1.75, M=50, W_ms=40.0, amp_frac=0.75),
-        "Custom": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac=0.70),
+        "Normal": dict(baseline_s=0.06, k=1.10, W_ms=35.0, amp_frac_on=0.70),
+        "ULP":    dict(baseline_s=0.06, k=1.50, W_ms=35.0, amp_frac_on=0.60),
+        "SD":     dict(baseline_s=0.06, k=1.75, W_ms=40.0, amp_frac_on=0.75),
+        "Custom": dict(baseline_s=0.06, k=1.10, W_ms=35.0, amp_frac_on=0.70),
     }
     base = pmap.get(prof, pmap["Normal"])
     baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=float(base["baseline_s"]), step=0.01)
     k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00,  value=float(base["k"]), step=0.10)
-    M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=int(base["M"]), step=1)
     W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=60.0,  value=float(base["W_ms"]), step=1.0)
-    amp_frac   = st.slider("정상화 최소 진폭 비율(주로 Onset)", 0.10, 0.90, float(base["amp_frac"]), 0.01)
-    st.caption("※ Offset은 N–D′ 기준으로 별도 고정(amp_frac_off=0.80) — DualDetector 내부 적용")
+    amp_frac_on = st.slider("정상화 최소 진폭 비율(주로 Onset)", 0.10, 0.90, float(base["amp_frac_on"]), 0.01)
+    st.caption("※ Offset은 N–D′ 기준으로 별도 고정 (amp_frac_off=0.80) → DualDetector 내부 적용")
 
     st.markdown("---")
     st.markdown("### 🧲 DualDetector 설정 (Onset / Offset 별도)")
     frame_ms = st.number_input("프레임 간격(ms)", min_value=0.10, max_value=5.0, value=0.66, step=0.01)
 
-    st.markdown("**Onset 설정**")
-    onset_theta = st.slider("θ_on (A_norm)", 0.10, 0.90, 0.50, 0.01)
-    onset_min_amp = st.slider("min_amp_frac", 0.10, 0.90, 0.58, 0.01)
-    onset_AP_min = st.slider("AP_min", 0.50, 1.00, 0.85, 0.01)
-    onset_TP_min = st.slider("TP_min", 0.50, 1.00, 0.90, 0.01)
-    onset_AS_min = st.slider("AS_corr_min", 0.50, 1.00, 0.95, 0.01)
-    onset_PS_max = st.slider("PS_dist_max", 0.00, 0.20, 0.05, 0.01)
-    onset_sustain = st.number_input("onset_sustain (frames)", min_value=1, max_value=60, value=5, step=1)
+adv = dict(baseline_s=baseline_s, k=k, W_ms=W_ms, amp_frac_on=amp_frac_on)
 
-    st.markdown("**Offset 설정 (N–D′ 기준 추천값)**")
-    offset_AS_max = st.slider("AS_corr_max", 0.50, 1.00, 0.88, 0.01)
-    offset_PS_min = st.slider("PS_dist_min", 0.00, 0.20, 0.10, 0.01)
-    offset_AP_max = st.slider("AP_max", 0.50, 1.00, 0.82, 0.01)
-    offset_TP_max = st.slider("TP_max", 0.50, 1.00, 0.88, 0.01)
-    offset_main_sus = st.number_input("main_sustain (frames)", min_value=1, max_value=200, value=90, step=1)
-    offset_aux_sus  = st.number_input("aux_sustain (frames)",  min_value=1, max_value=200, value=45, step=1)
-    offset_debounce = st.number_input("debounce (frames)",     min_value=0, max_value=60,  value=20, step=1)
-
-adv = dict(baseline_s=baseline_s, k=k, M=M, W_ms=W_ms, amp_frac=amp_frac)
-
-# ============== File Upload (단일 케이스) ==============
+# ---------------- File Upload ----------------
 uploaded = st.file_uploader("CSV 또는 XLSX 파일을 업로드하세요 (단일 케이스 분석)", type=["csv", "xlsx"])
-if uploaded is not None:
-    if uploaded.name.endswith(".csv"):
-        df = pd.read_csv(uploaded)
-    else:
-        df = pd.read_excel(uploaded)
+if uploaded:
+    df = pd.read_csv(uploaded) if uploaded.name.endswith(".csv") else pd.read_excel(uploaded)
+else:
+    st.info("⬆️ 상단에서 단일 케이스 파일을 업로드하면 분석/시각화 탭이 활성화됩니다.")
 
-    # ============== Run analysis (기존) ==============
-    summary, per_cycle, extras = analyze(df, adv)
+# ---------------- Tabs ----------------
+tabs = st.tabs(["Overview", "Visualization", "Validation", "Parameter Comparison"])
+
+# ===== 단일 케이스 분석 =====
+if uploaded:
+    summary, per_cycle, extras = analyze(df,
+                                         amp_frac_on=adv["amp_frac_on"],
+                                         amp_frac_off_fixed=0.80,
+                                         baseline_s=adv["baseline_s"],
+                                         k=adv["k"], W_ms=adv["W_ms"])
     viz = extras.get("viz", {})
     t         = viz.get("t", None)
     total_s   = viz.get("total_s", None)
@@ -652,66 +510,29 @@ if uploaded is not None:
     i_last    = viz.get("i_last", None)
     i_end     = viz.get("i_end", None)
     cycles    = viz.get("cycles", [])
-    AP = viz.get("AP"); TP = viz.get("TP"); AS_legacy = viz.get("AS_legacy")
-    AS_range = viz.get("AS_range"); AS_area = viz.get("AS_area"); AS_corr = viz.get("AS_corr")
-    PS_sim = viz.get("PS_sim"); PS_dist = viz.get("PS_dist"); VOnT = viz.get("VOnT"); VOffT = viz.get("VOffT")
-    fps  = float(extras.get("fps", np.nan))
-    ncyc = int(extras.get("n_cycles", 0))
+    AP = viz.get("AP"); TP = viz.get("TP"); AS_corr = viz.get("AS_corr"); PS_dist = viz.get("PS_dist")
+    VOnT = viz.get("VOnT"); VOffT = viz.get("VOffT")
+    fps  = float(extras.get("fps", np.nan)); ncyc = int(extras.get("n_cycles", 0))
 
-    # ============== DualDetector 실행을 위한 특징 구성 ==============
-    # A_norm: total_s를 [0,1]로 정규화
-    if total_s is not None and len(total_s):
-        mn, mx = float(np.nanmin(total_s)), float(np.nanmax(total_s))
-        denom = (mx - mn) if (mx - mn) > 1e-12 else 1.0
-        A_norm = (total_s - mn) / denom
-    else:
-        A_norm = np.zeros_like(total_s) if total_s is not None else np.array([])
-
-    on_cfg = OnsetConfig(theta=onset_theta, min_amp_frac=onset_min_amp,
-                         AP_min=onset_AP_min, TP_min=onset_TP_min,
-                         AS_corr_min=onset_AS_min, PS_dist_max=onset_PS_max,
-                         sustain_frames=int(onset_sustain))
-    off_cfg = OffsetConfig(AS_corr_max=offset_AS_max, PS_dist_min=offset_PS_min,
-                           AP_max=offset_AP_max, TP_max=offset_TP_max,
-                           main_sustain_frames=int(offset_main_sus),
-                           aux_sustain_frames=int(offset_aux_sus),
-                           debounce_frames=int(offset_debounce))
-
-    det_cfg = DetectorConfig(frame_ms=frame_ms, onset=on_cfg, offset=off_cfg)
-    det = DualDetector(det_cfg)
-
-    feats = {
-        "t_ms": (t * 1000.0) if (t is not None) else np.array([]),
-        "A_norm": A_norm if A_norm is not None else np.array([]),
-        "AP": np.repeat(AP if np.isfinite(AP) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
-        "TP": np.repeat(TP if np.isfinite(TP) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
-        "AS_corr": np.repeat(AS_corr if np.isfinite(AS_corr) else 1.0, len(A_norm)) if len(A_norm) else np.array([]),
-        "PS_dist": np.repeat(PS_dist if np.isfinite(PS_dist) else 0.0, len(A_norm)) if len(A_norm) else np.array([]),
-    }
-
-    det_res = det.detect(feats) if len(feats["t_ms"]) else {"onset_time_ms": None, "offset_time_ms": None, "duration_ms": None}
-    Auto_On_ms  = det_res.get("onset_time_ms")
-    Auto_Off_ms = det_res.get("offset_time_ms")
-    Auto_Dur_ms = det_res.get("duration_ms")
-
-    # ============== Tabs (케이스 시각화) ==============
-    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Visualization", "Validation", "Parameter Comparison"])
-
-    with tab1:
-        env = dict(
-            AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
-            AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
-            Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
-        )
-        render_overview(env)
+    with tabs[0]:
+        st.subheader("🩺 Overview")
+        # 간단 KPI
+        kpi_cols = st.columns(6)
+        kpi_cols[0].metric("AP", f"{AP:.4f}" if np.isfinite(AP) else "N/A")
+        kpi_cols[1].metric("TP", f"{TP:.4f}" if np.isfinite(TP) else "N/A")
+        kpi_cols[2].metric("PS_dist (0=정상)", f"{PS_dist:.4f}" if np.isfinite(PS_dist) else "N/A")
+        kpi_cols[3].metric("AS_corr", f"{AS_corr:.4f}" if np.isfinite(AS_corr) else "N/A")
+        kpi_cols[4].metric("Auto Off (ms)", f"{VOffT:.2f}" if np.isfinite(VOffT) else "N/A")
+        kpi_cols[5].metric("Auto Duration (ms)", f"{(VOffT+VOnT):.2f}" if (np.isfinite(VOffT) and np.isfinite(VOnT)) else "N/A")
+        st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
         st.dataframe(summary, use_container_width=True)
 
-    def make_total_plot(show_cycles=True, show_markers=True, show_auto=True, zoom="전체"):
+    def make_total_plot(show_cycles=True, show_markers=True, show_auto=True):
         fig = go.Figure()
         if t is None or total_s is None:
             fig.update_layout(template="simple_white", height=360); return fig
         fig.add_trace(go.Scatter(x=t, y=total_s, mode="lines",
-                                 line=dict(color=COLOR_TOTAL, width=2.2),
+                                 line=dict(color=COLOR_TOTAL, width=2.0),
                                  name="Total (smoothed)"))
         if show_cycles and cycles:
             for s, e in cycles[:120]:
@@ -719,294 +540,155 @@ if uploaded is not None:
         if show_markers:
             for idx, col, label in [
                 (i_move,   COLOR_MOVE,   "move"),
-                (i_steady, COLOR_STEADY, "steady"),
-                (i_last,   COLOR_LAST,   "last"),
+                (i_steady, COLOR_STEADY, "steady (On)"),
+                (i_last,   COLOR_LAST,   "last (Off ref)"),
                 (i_end,    COLOR_END,    "end"),
             ]:
                 if idx is not None and 0 <= int(idx) < len(t):
                     xval = t[int(idx)]
-                    fig.add_vline(x=xval, line=dict(color=col, dash="dot", width=1.6))
+                    fig.add_vline(x=xval, line=dict(color=col, dash="dot", width=1.4))
                     fig.add_annotation(x=xval, y=float(np.nanmax(total_s)), text=label,
                                        showarrow=False, font=dict(size=10, color=col), yshift=14)
-        if show_auto:
-            if isinstance(Auto_On_ms, (int,float)) and np.isfinite(Auto_On_ms):
-                xon = Auto_On_ms / 1000.0
-                fig.add_vline(x=xon, line=dict(color=COLOR_AUTOON, dash="dash", width=1.8))
-                fig.add_annotation(x=xon, y=float(np.nanmax(total_s)), text=f"Auto On {Auto_On_ms:.1f} ms",
-                                   showarrow=False, font=dict(size=10, color=COLOR_AUTOON), yshift=28)
-            if isinstance(Auto_Off_ms, (int,float)) and np.isfinite(Auto_Off_ms):
-                xoff = Auto_Off_ms / 1000.0
-                fig.add_vline(x=xoff, line=dict(color=COLOR_AUTOOFF, dash="dash", width=1.8))
-                fig.add_annotation(x=xoff, y=float(np.nanmax(total_s)), text=f"Auto Off {Auto_Off_ms:.1f} ms",
-                                   showarrow=False, font=dict(size=10, color=COLOR_AUTOOFF), yshift=42)
-        if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
-        elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
+        if show_auto and np.isfinite(VOffT) and np.isfinite(VOnT):
+            # 표시용 가이드
+            pass
         fig.update_layout(title="Total Signal with Detected Events",
                           xaxis_title="Time (s)", yaxis_title="Gray Level (a.u.)",
                           template="simple_white", height=420,
                           legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
         return fig
 
-    def make_lr_plot(normalize=False, zoom="전체"):
-        fig = go.Figure()
-        if t is None or (left_s is None and right_s is None):
-            fig.update_layout(template="simple_white", height=340); return fig
-        def _norm(x):
-            if x is None: return None
-            mn, mx = np.nanmin(x), np.nanmax(x)
-            return (x - mn) / (mx - mn + 1e-12)
-        L = _norm(left_s) if normalize else left_s
-        R = _norm(right_s) if normalize else right_s
-        if L is not None:
-            fig.add_trace(go.Scatter(x=t, y=L, name="Left",
-                                     mode="lines", line=dict(color=COLOR_LEFT, width=2.0)))
-        if R is not None:
-            fig.add_trace(go.Scatter(x=t, y=R, name="Right",
-                                     mode="lines", line=dict(color=COLOR_RIGHT, width=2.0, dash="dot")))
-        if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
-        elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
-        fig.update_layout(title=f"Left vs Right (AS_range {_val(AS_range,2)} · AS_corr {_val(AS_corr,2)})",
-                          xaxis_title="Time (s)",
-                          yaxis_title=("Normalized" if normalize else "Gray Level (a.u.)"),
-                          template="simple_white", height=340,
-                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
-        return fig
-
-    def make_energy_plot(mode="on", show_markers=True, zoom="전체"):
+    def make_energy_plot(mode="on"):
         fig = go.Figure()
         if t is None:
             fig.update_layout(template="simple_white", height=320); return fig
         if mode == "on":
-            E, Th, Tl, color, label, event_idx = E_on, thr_on, Tlow_on, COLOR_CRIMSON, "Onset", i_move
+            E, Th, Tl, color, label, event_idx = E_on, thr_on, Tlow_on, COLOR_CRIMSON, "Onset", i_steady
         else:
             E, Th, Tl, color, label, event_idx = E_off, thr_off, Tlow_off, COLOR_ROYAL, "Offset", i_end
         if E is not None:
             fig.add_trace(go.Scatter(x=t, y=E, name=f"E_{label.lower()}",
                                      mode="lines", line=dict(color=color, width=2.0)))
         if Th is not None:
-            fig.add_hline(y=float(Th), line=dict(color=color, width=1.5),
+            fig.add_hline(y=float(Th), line=dict(color=color, width=1.3),
                           annotation_text=f"thr_{label.lower()}", annotation_position="top left")
         if Tl is not None:
-            fig.add_hline(y=float(Tl), line=dict(color=color, dash="dot", width=1.2),
+            fig.add_hline(y=float(Tl), line=dict(color=color, dash="dot", width=1.0),
                           annotation_text=f"Tlow_{label.lower()}", annotation_position="bottom left")
-        if show_markers and event_idx is not None and 0 <= int(event_idx) < len(t):
+        if event_idx is not None and 0 <= int(event_idx) < len(t):
             xval = t[int(event_idx)]
-            fig.add_vline(x=xval, line=dict(color=color, dash="dot", width=1.6))
-            if E is not None:
-                fig.add_annotation(x=xval, y=float(np.nanmax(E)), text=f"{label} @ {xval*1000.0:.2f} ms",
-                                   showarrow=False, font=dict(size=10, color=color), yshift=14)
-        if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
-        elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
+            fig.add_vline(x=xval, line=dict(color=color, dash="dot", width=1.2))
         fig.update_layout(title=f"Energy & Thresholds – {label}",
                           xaxis_title="Time (s)", yaxis_title="Energy (a.u.)",
                           template="simple_white", height=320,
                           legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
         return fig
 
-    with tab2:
-        cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
-        show_cycles   = cc1.checkbox("Cycle 밴드 표시", True)
-        show_markers  = cc2.checkbox("이벤트 마커 표시", True)
-        show_auto     = cc3.checkbox("Auto On/Off 표시", True)
-        zoom_preset   = cc4.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"])
-        normalize_lr  = cc5.checkbox("좌/우 정규화", False)
-        energy_mode   = cc6.radio("에너지 뷰", ["Onset", "Offset"], horizontal=True)
-
+    with tabs[1]:
         st.markdown("#### A) Total")
-        st.plotly_chart(make_total_plot(show_cycles, show_markers, show_auto, zoom_preset), use_container_width=True)
+        st.plotly_chart(make_total_plot(), use_container_width=True)
+        st.markdown("#### B) Energy – Onset")
+        st.plotly_chart(make_energy_plot("on"), use_container_width=True)
+        st.markdown("#### C) Energy – Offset")
+        st.plotly_chart(make_energy_plot("off"), use_container_width=True)
 
-        st.markdown("#### B) Left vs Right")
-        st.plotly_chart(make_lr_plot(normalize_lr, zoom_preset), use_container_width=True)
-
-        st.markdown("#### C) Energy + Thresholds")
-        st.plotly_chart(make_energy_plot("on" if energy_mode == "Onset" else "off",
-                                         show_markers, zoom_preset), use_container_width=True)
-
-    with tab3:
+    with tabs[2]:
         st.subheader("📊 Validation (RMSE / MAE / Bias)")
-        st.info("자동 vs 수동 측정치 정량검증은 Batch Offset 집계와 함께 확장됩니다. (Bias 히스토그램 포함)")
+        st.info("자동 vs 수동 측정 정량검증(배치/히스토그램)은 다음 릴리스에서 확장됩니다.")
 
-    # ==========================
-    # NEW: Parameter Comparison (누적형)
-    # ==========================
-    with tab4:
-        st.subheader("🧪 Parameter Comparison (Normal vs ULP vs SD)")
-        st.caption("파일 형식: case_id, group, AP, TP, AS_corr, PS_dist (CSV/XLSX)")
+# ===== Parameter Comparison (누적) =====
+with tabs[3]:
+    st.subheader("Parameter Comparison (Normal vs ULP vs SD)")
+    st.caption("파일 형식: case_id, group, AP, TP, AS_corr, PS_dist (CSV/XLSX)")
+    col_btn, col_fdr = st.columns([1,1])
+    reset = col_btn.button("🗂️ 히스토리 초기화")
+    do_fdr = col_fdr.checkbox("FDR 보정(BH)", value=False)
 
-        if 'param_history' not in st.session_state:
-            st.session_state['param_history'] = []
+    if reset:
+        if "param_history" in st.session_state:
+            st.session_state.pop("param_history")
+        st.success("히스토리를 초기화했습니다.")
 
-        colA, colB, colC = st.columns([2,1,1])
-        with colB:
-            reset = st.button("🔄 히스토리 초기화")
-        with colC:
-            fdr_on = st.checkbox("FDR 보정(BH)", value=False)
+    multi = st.file_uploader("여러 파일 업로드 가능 (Normal/ULP/SD)", type=["csv","xlsx"], accept_multiple_files=True)
+    # 세션 저장소
+    if "param_history" not in st.session_state:
+        st.session_state["param_history"] = []
 
-        if reset:
-            st.session_state['param_history'] = []
-            st.success("히스토리를 초기화했습니다.")
-
-        up_files = st.file_uploader("📂 여러 파일 업로드 가능 (Normal/ULP/SD)", type=["csv","xlsx"], accept_multiple_files=True)
-        if up_files:
-            dfs = []
-            for f in up_files:
-                if f.name.endswith(".csv"):
-                    d = pd.read_csv(f)
-                else:
-                    d = pd.read_excel(f)
-
-                # 컬럼 정규화
-                d.columns = [c.strip() for c in d.columns]
-                # group 감지 (없으면 파일명 추론)
-                if "group" not in d.columns:
-                    g = "Unknown"
-                    nameU = f.name.upper()
-                    if "NORMAL" in nameU or "NORM" in nameU: g = "Normal"
-                    elif "ULP" in nameU: g = "ULP"
-                    elif "SD" in nameU: g = "SD"
-                    d["group"] = g
-                dfs.append(d)
-
-            data = pd.concat(dfs, ignore_index=True)
-
-            req_cols = {"case_id","group","AP","TP","AS_corr","PS_dist"}
-            miss = req_cols - set(data.columns)
+    def _read_comp_file(buf):
+        try:
+            df = pd.read_csv(buf) if buf.name.endswith(".csv") else pd.read_excel(buf)
+            cols = [c.strip() for c in df.columns]
+            req = ["case_id","AP","TP","AS_corr","PS_dist"]
+            miss = [c for c in req if c not in cols]
             if miss:
-                st.error(f"필수 컬럼 누락: {sorted(list(miss))}")
+                st.error(f"필수 컬럼 누락: {miss}")
+                return None
+            if "group" not in cols:
+                # 파일명에서 추정 (Normal/ULP/SD 포함 시)
+                g_guess = "Unknown"
+                for g in ["Normal","ULP","SD"]:
+                    if g.lower() in buf.name.lower(): g_guess = g
+                df["group"] = g_guess
+            return df[["case_id","group","AP","TP","AS_corr","PS_dist"]]
+        except Exception as e:
+            st.error(f"읽기 오류: {e}")
+            return None
+
+    if multi:
+        for f in multi:
+            d = _read_comp_file(f)
+            if d is not None and len(d):
+                st.session_state["param_history"].append(d)
+        st.success(f"총 {len(st.session_state['param_history'])}개 테이블 누적")
+
+    if st.session_state["param_history"]:
+        comp = pd.concat(st.session_state["param_history"], ignore_index=True)
+        st.markdown("#### 누적 히스토리")
+        st.dataframe(comp, height=280, use_container_width=True)
+
+        # 그룹 통계
+        st.markdown("#### 그룹 통계")
+        g = comp.groupby("group")[["AP","TP","AS_corr","PS_dist"]].agg(["mean","std","count"])
+        st.dataframe(g, use_container_width=True)
+
+        # 간단 검정
+        st.markdown("#### 통계 검정 (AP, TP, AS_corr, PS_dist)")
+        def _anova_or_kw(df, col):
+            res = {}
+            if not _HAS_SCIPY:
+                res["test"] = "N/A"; res["p"] = np.nan; return res
+            groups = [grp[col].dropna().values for _, grp in df.groupby("group")]
+            if all(len(v) >= 3 for v in groups):
+                try:
+                    stat, p = stats.f_oneway(*groups); res["test"]="ANOVA"; res["p"]=p
+                except Exception:
+                    stat, p = stats.kruskal(*groups); res["test"]="Kruskal"; res["p"]=p
             else:
-                st.write("📄 업로드 데이터 미리보기")
-                st.dataframe(data.head(), use_container_width=True)
+                stat, p = stats.kruskal(*groups); res["test"]="Kruskal"; res["p"]=p
+            return res
 
-                grp = data.groupby("group")[["AP","TP","AS_corr","PS_dist"]].agg(["mean","std","count"])
-                st.markdown("### 📈 그룹 통계 (Mean ± SD, n)")
-                st.dataframe(grp, use_container_width=True)
+        rows = []
+        for col in ["AP","TP","AS_corr","PS_dist"]:
+            r = _anova_or_kw(comp, col)
+            rows.append(dict(metric=col, test=r["test"], p_value=r["p"]))
+        test_df = pd.DataFrame(rows)
 
-                # 통계검정
-                def _kw_anova_param(df, param):
-                    # 그룹 추출
-                    groups = []
-                    labels = []
-                    for g, sub in df.groupby("group"):
-                        arr = pd.to_numeric(sub[param], errors="coerce").dropna().values
-                        if len(arr) > 0:
-                            groups.append(arr); labels.append(g)
-                    if len(groups) < 2:
-                        return "Insufficient", np.nan
+        if do_fdr and _HAS_SCIPY:
+            # Benjamini–Hochberg
+            ps = test_df["p_value"].values.astype(float)
+            m = len(ps)
+            order = np.argsort(ps); ranked = np.empty_like(order); ranked[order]=np.arange(1,m+1)
+            q = 0.05
+            adj = ps * m / ranked
+            test_df["p_fdr"] = np.minimum.accumulate(np.sort(adj)[::-1])[::-1][ranked.argsort()] if m>1 else adj
+        st.dataframe(test_df, use_container_width=True)
 
-                    # 정규성 전체 패스 조건 체크(소표본이므로 관대 적용)
-                    normal_ok = False
-                    if _HAS_SPSTATS and all(len(gv) >= 3 for gv in groups):
-                        try:
-                            pvals_norm = [_spstats.shapiro(gv)[1] for gv in groups]
-                            normal_ok = all(p > 0.05 for p in pvals_norm)
-                        except Exception:
-                            normal_ok = False
-
-                    if _HAS_SPSTATS and normal_ok and len(groups) >= 3:
-                        # ANOVA
-                        try:
-                            stat, p = _spstats.f_oneway(*groups)
-                            return "ANOVA", float(p)
-                        except Exception:
-                            pass
-
-                    # Kruskal–Wallis (fallback)
-                    if _HAS_SPSTATS:
-                        stat, p = _spstats.kruskal(*groups)
-                        return "Kruskal-Wallis", float(p)
-                    else:
-                        # scipy 없는 환경: p 제공 불가
-                        return "Kruskal-Wallis (approx)", np.nan
-
-                params = ["AP","TP","AS_corr","PS_dist"]
-                rows = []
-                for p_ in params:
-                    method, pval = _kw_anova_param(data, p_)
-                    rows.append(dict(Parameter=p_, Method=method, p_value=pval))
-                stat_df = pd.DataFrame(rows)
-
-                # FDR 보정 (Benjamini–Hochberg)
-                if fdr_on and np.isfinite(stat_df["p_value"]).any():
-                    pvals = stat_df["p_value"].astype(float).values
-                    mask = np.isfinite(pvals)
-                    if mask.sum() > 0:
-                        order = np.argsort(pvals[mask])
-                        ranked = np.empty_like(pvals[mask], dtype=float); ranked[order] = np.arange(1, mask.sum()+1)
-                        q = 0.05
-                        bh = pvals.copy().astype(float)
-                        bh_mask = mask.copy()
-                        bh_vals = pvals[mask]
-                        bh_adj = bh_vals * (mask.sum() / ranked)
-                        bh[mask] = np.minimum(1.0, bh_adj)
-                        stat_df["p_FDR(BH)"] = bh
-                st.markdown("### 📉 통계 결과")
-                st.dataframe(stat_df.style.format({"p_value":"{:.4f}","p_FDR(BH)":"{:.4f}"}), use_container_width=True)
-
-                # 시각화: Bar(Mean±SD), Scatter, Trend
-                st.markdown("### 📊 시각화")
-                # Melt for plotting
-                melt = data.melt(id_vars=["case_id","group"], value_vars=params,
-                                 var_name="Parameter", value_name="Value")
-
-                # Bar (mean±sd)
-                means = data.groupby("group")[params].mean().reset_index()
-                sds   = data.groupby("group")[params].std().reset_index()
-                for p_ in params:
-                    fig = go.Figure()
-                    # mean bar
-                    fig.add_trace(go.Bar(x=means["group"], y=means[p_], name=f"{p_} mean"))
-                    # error bar
-                    fig.update_traces(error_y=dict(type='data', array=sds[p_].fillna(0.0)))
-                    fig.update_layout(title=f"{p_} – Mean ± SD", template="simple_white",
-                                      xaxis_title="Group", yaxis_title=p_)
-                    st.plotly_chart(fig, use_container_width=True)
-
-                # Scatter swarm
-                fig_scatter = px.strip(melt, x="group", y="Value", color="Parameter",
-                                       stripmode="overlay", hover_data=["case_id"],
-                                       category_orders={"group":["Normal","ULP","SD"]})
-                fig_scatter.update_layout(title="Scatter Swarm by Group",
-                                          template="simple_white")
-                st.plotly_chart(fig_scatter, use_container_width=True)
-
-                # Trend (Normal → ULP → SD)
-                order_groups = ["Normal","ULP","SD"]
-                mean_tbl = data.groupby("group")[params].mean().reindex(order_groups).reset_index()
-                fig_trend = go.Figure()
-                for p_ in params:
-                    fig_trend.add_trace(go.Scatter(x=mean_tbl["group"], y=mean_tbl[p_],
-                                                   mode="lines+markers", name=p_))
-                fig_trend.update_layout(title="Trend (Normal → ULP → SD)",
-                                        template="simple_white",
-                                        xaxis_title="Group", yaxis_title="Mean")
-                st.plotly_chart(fig_trend, use_container_width=True)
-
-                # 히스토리 저장 (요약 + 통계)
-                rec = {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "summary": grp.reset_index(),
-                    "stats": stat_df.copy(),
-                }
-                st.session_state['param_history'].append(rec)
-                st.success("✅ 분석 완료 · 히스토리에 저장했습니다.")
-
-        st.markdown("### 🗂️ 누적 히스토리")
-        hist = st.session_state.get('param_history', [])
-        if hist:
-            for i, rec in enumerate(hist[::-1], 1):
-                with st.expander(f"[{i}] {rec['timestamp']}"):
-                    st.write("• Group Summary")
-                    st.dataframe(rec["summary"], use_container_width=True)
-                    st.write("• Stats")
-                    st.dataframe(rec["stats"].style.format({"p_value":"{:.4f}","p_FDR(BH)":"{:.4f}"}), use_container_width=True)
-        else:
-            st.info("아직 저장된 히스토리가 없습니다.")
-
-        st.markdown("---")
-        st.caption("해석 가이드: AP↓(진폭 불규칙↑), TP↓(주기 불안정↑), AS_corr↓(좌우 불균형↑), PS_dist↑(위상 비동기↑)")
-
-else:
-    st.info("⬆️ 상단에서 단일 케이스 파일을 업로드하면 분석/시각화 탭이 활성화됩니다.")
-
-st.markdown("---")
-st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+        # 라인/바 간단 시각화
+        for col in ["AP","TP","AS_corr","PS_dist"]:
+            fig = go.Figure()
+            gg = comp.groupby("group")[col].mean().reset_index()
+            fig.add_trace(go.Bar(x=gg["group"], y=gg[col], name=col))
+            fig.update_layout(title=f"{col} – 그룹 평균", template="simple_white", height=320)
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("아직 저장된 히스토리가 없습니다.")
