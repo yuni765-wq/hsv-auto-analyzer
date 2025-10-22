@@ -709,13 +709,141 @@ def make_total_plot(t, total_s, cycles, i_move, i_steady, i_last, i_end, Auto_On
                       legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
     return fig
 
+# ---- Left vs Right plot (예전 스타일) ----
+def make_lr_plot2(t, left_s, right_s, AS_range, AS_corr, normalize=False, zoom="전체"):
+    fig = go.Figure()
+    if t is None or (left_s is None and right_s is None):
+        fig.update_layout(template="simple_white", height=340)
+        return fig
+
+    def _norm(x):
+        if x is None: return None
+        mn, mx = np.nanmin(x), np.nanmax(x)
+        return (x - mn) / (mx - mn + 1e-12)
+
+    L = _norm(left_s) if normalize else left_s
+    R = _norm(right_s) if normalize else right_s
+
+    if L is not None:
+        fig.add_trace(go.Scatter(x=t, y=L, name="Left",
+                                 mode="lines", line=dict(color=COLOR_LEFT, width=2.0)))
+    if R is not None:
+        fig.add_trace(go.Scatter(x=t, y=R, name="Right",
+                                 mode="lines", line=dict(color=COLOR_RIGHT, width=2.0, dash="dot")))
+
+    if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
+    elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
+
+    title = f"Left vs Right (AS_range {AS_range:.2f} · AS_corr {AS_corr:.2f})" if \
+            (AS_range is not None and AS_corr is not None and
+             isinstance(AS_range,(int,float)) and isinstance(AS_corr,(int,float))) else "Left vs Right"
+    fig.update_layout(title=title,
+                      xaxis_title="Time (s)",
+                      yaxis_title=("Normalized" if normalize else "Gray Level (a.u.)"),
+                      template="simple_white", height=340,
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+    return fig
+
+
+# ---- Energy plot (Onset / Offset 전환) ----
+def make_energy_plot2(mode, t, E_on, thr_on, Tlow_on, E_off, thr_off, Tlow_off, i_move, i_end, zoom="전체"):
+    """
+    mode: 'on' or 'off'
+    """
+    fig = go.Figure()
+    if t is None:
+        fig.update_layout(template="simple_white", height=320)
+        return fig
+
+    if mode == "on":
+        E, Th, Tl, color, label, event_idx = E_on, thr_on, Tlow_on, COLOR_CRIMSON, "Onset", i_move
+    else:
+        E, Th, Tl, color, label, event_idx = E_off, thr_off, Tlow_off, COLOR_ROYAL, "Offset", i_end
+
+    if E is not None:
+        fig.add_trace(go.Scatter(x=t, y=E, name=f"E_{label.lower()}",
+                                 mode="lines", line=dict(color=color, width=2.0)))
+    if Th is not None:
+        fig.add_hline(y=float(Th), line=dict(color=color, width=1.5),
+                      annotation_text=f"thr_{label.lower()}", annotation_position="top left")
+    if Tl is not None:
+        fig.add_hline(y=float(Tl), line=dict(color=color, dash="dot", width=1.2),
+                      annotation_text=f"Tlow_{label.lower()}", annotation_position="bottom left")
+    if event_idx is not None and t is not None and 0 <= int(event_idx) < len(t):
+        xval = t[int(event_idx)]
+        fig.add_vline(x=xval, line=dict(color=color, dash="dot", width=1.6))
+        if E is not None:
+            fig.add_annotation(x=xval, y=float(np.nanmax(E)), text=f"{label} @ {xval*1000.0:.2f} ms",
+                               showarrow=False, font=dict(size=10, color=color), yshift=14)
+
+    if zoom == "0–0.2s":   fig.update_xaxes(range=[0, 0.2])
+    elif zoom == "0–0.5s": fig.update_xaxes(range=[0, 0.5])
+
+    fig.update_layout(title=f"Energy & Thresholds – {label}",
+                      xaxis_title="Time (s)", yaxis_title="Energy (a.u.)",
+                      template="simple_white", height=320,
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+    return fig
+
 if "Visualization" in tab_names and uploaded is not None:
     with tabs[tab_names.index("Visualization")]:
-        cc1, cc2, cc3 = st.columns(3)
-        zoom_preset = cc1.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"])
-        st.plotly_chart(make_total_plot(t, total_s, cycles, i_move, i_steady, i_last, i_end,
-                                        Auto_On_ms, Auto_Off_ms, zoom_preset),
-                        use_container_width=True)
+        st.markdown("#### Visualization")
+
+        c1, c2, c3 = st.columns(3)
+        view = c1.selectbox("표시 프리셋", ["전체", "좌/우", "Onset 에너지", "Offset 에너지"], index=0)
+        zoom_preset = c2.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"], index=0)
+        energy_mode = c3.radio("에너지 뷰", ["Onset", "Offset"], horizontal=True, index=0)
+
+        # A) Total
+        if view == "전체":
+            st.markdown("#### A) Total")
+            st.plotly_chart(
+                make_total_plot(t, total_s, cycles, i_move, i_steady, i_last, i_end,
+                                Auto_On_ms, Auto_Off_ms, zoom_preset),
+                use_container_width=True
+            )
+
+            # B) Left vs Right
+            st.markdown("#### B) Left vs Right")
+            normalize_lr = st.checkbox("좌/우 정규화", value=False)
+            st.plotly_chart(
+                make_lr_plot2(t, left_s, right_s, AS_range, AS_corr, normalize_lr, zoom_preset),
+                use_container_width=True
+            )
+
+            # C) Energy + Thresholds
+            st.markdown("#### C) Energy + Thresholds")
+            st.plotly_chart(
+                make_energy_plot2("on" if energy_mode == "Onset" else "off",
+                                  t, E_on, thr_on, Tlow_on, E_off, thr_off, Tlow_off,
+                                  i_move, i_end, zoom_preset),
+                use_container_width=True
+            )
+
+        elif view == "좌/우":
+            st.markdown("#### Left vs Right")
+            normalize_lr = st.checkbox("좌/우 정규화", value=False)
+            st.plotly_chart(
+                make_lr_plot2(t, left_s, right_s, AS_range, AS_corr, normalize_lr, zoom_preset),
+                use_container_width=True
+            )
+
+        elif view == "Onset 에너지":
+            st.markdown("#### Energy (Onset)")
+            st.plotly_chart(
+                make_energy_plot2("on", t, E_on, thr_on, Tlow_on, E_off, thr_off, Tlow_off,
+                                  i_move, i_end, zoom_preset),
+                use_container_width=True
+            )
+
+        elif view == "Offset 에너지":
+            st.markdown("#### Energy (Offset)")
+            st.plotly_chart(
+                make_energy_plot2("off", t, E_on, thr_on, Tlow_on, E_off, thr_off, Tlow_off,
+                                  i_move, i_end, zoom_preset),
+                use_container_width=True
+            )
+
 
 # ---- Validation ----
 if "Validation" in tab_names and uploaded is not None:
@@ -859,3 +987,4 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+
