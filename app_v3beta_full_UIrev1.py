@@ -16,18 +16,32 @@ Assumes:
 """
 
 import os
+import io
+import tempfile
 import streamlit as st
 
-# ---- THEME HINT (run with: streamlit run app_v3beta_full_UIrev1.py) ----
-# You can also set these in .streamlit/config.toml
+# ---- THEME HINT ----
 WHITEBOARD_BG = "#ffffff"
 SOFT_GRAY = "#f5f7fb"
 ACCENT = "#1f6feb"   # subtle blue
 MUTED = "#657388"
 
+# ---- PAGE CONFIG (상단 잘림 방지: 가장 먼저 선언) ----
+st.set_page_config(page_title="R&D v3β – UIrev1", layout="wide")
+st.markdown(
+    """
+    <style>
+      /* 상단/헤더가 탭과 겹치지 않도록 여백 보정 */
+      .block-container { padding-top: 2.2rem !important; padding-bottom: 2rem; max-width: 1100px; }
+      header { margin-bottom: 0.5rem !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---- ENV / PATHS ----
-BASE_DIR = os.environ.get("STAT_BASE_DIR", os.getcwd())
-ANALYSIS_FILE = os.environ.get("STAT_ANALYSIS_FILE", os.path.join(BASE_DIR, "analysis_all.xlsx"))
+DEFAULT_BASE_DIR = os.environ.get("STAT_BASE_DIR", os.getcwd())
+DEFAULT_ANALYSIS_FILE = os.environ.get("STAT_ANALYSIS_FILE", os.path.join(DEFAULT_BASE_DIR, "analysis_all.xlsx"))
 
 # ---- IMPORT MODULES ----
 from modules.stats_tab import render_dunn_heatmap, format_kruskal_table, StatTabData
@@ -35,50 +49,37 @@ from modules.parameter_tab import render_parameter_tab
 from modules.duration_tab import render_duration_tab
 
 
-# --------------------------- UI HELPERS --------------------------- #
+# --------------------------- UTILS --------------------------- #
+def _on_cloud() -> bool:
+    # Streamlit Cloud에서는 이 값이 존재
+    return os.environ.get("STREAMLIT_SERVER_BASE_URL") is not None
+
 def _whiteboard_css():
     st.markdown(
         f"""
         <style>
-        .stApp {{
-            background: {WHITEBOARD_BG};
-        }}
-        section.main > div {{
-            padding-top: 0.5rem;
-        }}
-        .block-container {{
-            padding-top: 1.2rem;
-            padding-bottom: 2rem;
-            max-width: 1100px;
-        }}
+        .stApp {{ background: {WHITEBOARD_BG}; }}
+        section.main > div {{ padding-top: 0.5rem; }}
         .metric, .stDataFrame, .stTable {{
             background: {SOFT_GRAY};
             border-radius: 16px;
             padding: 4px 8px;
         }}
-        .e1f1d6gn0 {{
-            background: {SOFT_GRAY} !important;  /* dataframe toolbar area */
-        }}
-        .smallnote {{
-            color: {MUTED};
-            font-size: 0.9rem;
-        }}
+        .e1f1d6gn0 {{ background: {SOFT_GRAY} !important; }}  /* dataframe toolbar area */
+        .smallnote {{ color: {MUTED}; font-size: 0.9rem; }}
         .chip {{
             display: inline-block; padding: 2px 8px; border-radius: 999px;
             background: #eef2ff; color: #334155; border: 1px solid #e5e7eb; margin-right: 4px;
         }}
-        .divider {{
-            height: 1px; background: #e7e9ee; margin: 12px 0 16px 0;
-        }}
+        .divider {{ height: 1px; background: #e7e9ee; margin: 12px 0 16px 0; }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-
 def _header():
     st.markdown(
-        f"""
+        """
         <div style="display:flex;align-items:center;gap:10px;">
             <div style="font-size:1.6rem;font-weight:700;">R&D Analysis – v3β</div>
             <div class="chip">Whiteboard</div>
@@ -90,35 +91,87 @@ def _header():
         unsafe_allow_html=True,
     )
 
+def _save_uploaded_to_temp(uploaded_file) -> str:
+    """
+    UploadedFile을 임시 경로로 저장해 모듈들이 '파일 경로'로 읽을 수 있게 함.
+    """
+    suffix = ".csv" if uploaded_file.name.lower().endswith(".csv") else ".xlsx"
+    fd, tmp_path = tempfile.mkstemp(prefix="analysis_", suffix=suffix)
+    with os.fdopen(fd, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return tmp_path
 
+
+# --------------------------- SIDEBAR --------------------------- #
 def _sidebar():
+    # session_state에 현재 분석 파일 경로를 보관
+    if "analysis_file_path" not in st.session_state:
+        st.session_state.analysis_file_path = DEFAULT_ANALYSIS_FILE
+
     with st.sidebar:
-        st.markdown("### Settings")
-        st.write(f"**BASE_DIR**: `{BASE_DIR}`")
-        st.write(f"**ANALYSIS_FILE**: `{ANALYSIS_FILE}`")
-        st.caption("환경변수로 바꾸려면:\n"
-                   "`STAT_BASE_DIR`, `STAT_ANALYSIS_FILE` 사용")
+        st.markdown("### Upload data")
+        up = st.file_uploader(
+            "CSV / XLSX 파일을 드래그&드롭하거나 선택하세요",
+            type=["csv", "xlsx"], accept_multiple_files=False,
+            help="analysis_all.xlsx 형식 권장 (columns: case_id, group, AP, TP, AS_corr, PS_dist …)",
+        )
+
+        if up is not None:
+            try:
+                tmp_path = _save_uploaded_to_temp(up)
+                st.session_state.analysis_file_path = tmp_path
+                st.success(f"업로드 완료: {up.name}")
+            except Exception as e:
+                st.error(f"업로드 파일 저장 중 오류: {e}")
+
+        # 로컬 개발용: 경로 직접 입력(Cloud에서는 숨김)
+        if not _on_cloud():
+            st.markdown("---")
+            new_path = st.text_input(
+                "또는 파일 경로(로컬 개발용):",
+                value=st.session_state.analysis_file_path or "",
+                help="CSV/XLSX 경로 입력. Cloud에서는 의미가 없습니다."
+            )
+            if new_path and new_path != st.session_state.analysis_file_path:
+                st.session_state.analysis_file_path = new_path
+
+        st.caption(f"현재 분석 파일: `{st.session_state.analysis_file_path}`")
+
+        # Stats용 BASE_DIR 안내 (결과 CSV가 있는 폴더)
         st.markdown("---")
         st.markdown("#### Quick Links")
         st.markdown("- Parameter Comparison")
         st.markdown("- Statistical Analysis")
         st.markdown("- Auto Duration")
-        st.markdown("---")
-        st.caption("Tip: 결과 CSV를 BASE_DIR에 두면 자동 인식됩니다.")
+
+        if not _on_cloud():
+            st.markdown("---")
+            st.markdown("### Settings (local)")
+            st.code(f"BASE_DIR: {DEFAULT_BASE_DIR}")
+            st.code(f"ANALYSIS_FILE (default): {DEFAULT_ANALYSIS_FILE}")
+            st.caption("환경변수: STAT_BASE_DIR, STAT_ANALYSIS_FILE")
 
 
 # --------------------------- TABS --------------------------- #
 def tab_parameter():
     st.subheader("Parameter Comparison")
     st.caption("Boxplot + group-wise descriptive (optional log1p).")
-    render_parameter_tab(ANALYSIS_FILE, group_col="group")
+
+    analysis_file = st.session_state.get("analysis_file_path", DEFAULT_ANALYSIS_FILE)
+    if not analysis_file or (not os.path.exists(analysis_file) and not _on_cloud()):
+        st.error("분석 파일을 찾을 수 없습니다. 좌측에서 업로드하거나 경로를 확인하세요.")
+        return
+
+    # parameter_tab은 '경로'를 기대하므로 그대로 전달
+    render_parameter_tab(analysis_file, group_col="group")
 
 
 def tab_statistical():
     st.subheader("Statistical Analysis")
     st.caption("Dunn FDR (log1p) matrix + Kruskal + Descriptive.")
 
-    data = StatTabData(BASE_DIR)
+    # BASE_DIR의 결과 CSV들을 읽음
+    data = StatTabData(DEFAULT_BASE_DIR)
     params, pretty = data.list_params()
 
     if not params:
@@ -168,10 +221,9 @@ def tab_statistical():
             mime="text/csv",
         )
     with d2:
-        import io
         buf = io.BytesIO()
         fig2 = render_dunn_heatmap(mat, p_thr=thr, p_thr2=thr2, title=f"Dunn FDR (log1p) – {choice_disp}")
-        fig2.savefig(buf, format="png", dpi=180)
+        fig2.savefig(buf, format="png", dpi=180, bbox_inches="tight")
         st.download_button(
             "Download heatmap PNG",
             data=buf.getvalue(),
@@ -183,12 +235,17 @@ def tab_statistical():
 def tab_duration():
     st.subheader("Auto Duration")
     st.caption("Summaries for AutoDuration_ms, or VOnT/VOffT → AutoDuration.")
-    render_duration_tab(ANALYSIS_FILE)
+
+    analysis_file = st.session_state.get("analysis_file_path", DEFAULT_ANALYSIS_FILE)
+    if not analysis_file or (not os.path.exists(analysis_file) and not _on_cloud()):
+        st.error("분석 파일을 찾을 수 없습니다. 좌측에서 업로드하거나 경로를 확인하세요.")
+        return
+
+    render_duration_tab(analysis_file)
 
 
 # --------------------------- MAIN --------------------------- #
 def main():
-    st.set_page_config(page_title="R&D v3β – UIrev1", layout="wide")
     _whiteboard_css()
     _sidebar()
     _header()
