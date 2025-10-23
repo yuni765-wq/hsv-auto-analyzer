@@ -1,7 +1,11 @@
 # requirements.txt
+
 streamlit
 pandas
 numpy
 openpyxl
 plotly
 matplotlib
+scipy
+scikit-posthocs
+seaborn
