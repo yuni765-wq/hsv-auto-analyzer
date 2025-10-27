@@ -623,7 +623,11 @@ def render_overview(env: dict, keys=None):
 # -------------------- Sidebar --------------------
 with st.sidebar:
     st.markdown("### 🧩 Preset")
-    advanced = st.toggle("Advanced (연구자 모드 열기)", value=False, help="일반 임상 사용자는 끄고 사용하세요. Stable v3.1 프리셋이 자동 적용됩니다.")
+    advanced = st.toggle("Advanced (연구자 모드 열기)", value=False, help="일반 임상 사용자는 끄고 사용하세요. Stable v3.1 프리셋이 자동 적용됩니다.")    
+    st.markdown("---")
+    st.markdown("### 🔬 Debug / Research")
+    debug_view = st.toggle("Show debug info (연구자 전용)", value=False, key="debug_view")
+
 
     # Stable v3.1 프리셋(임상 기본): 슬라이더 숨김
     STABLE_PRESET = dict(baseline_s=0.06, k=1.40, M=40, W_ms=40.0, amp_frac_on=0.70)  # v3.1 권장값
@@ -1073,6 +1077,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
