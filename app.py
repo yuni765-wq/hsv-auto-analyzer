@@ -543,36 +543,33 @@ def to_scalar(x):
         
 def render_overview(env: dict, keys=None):
     st.subheader("🩺 Overview")
-
-    # 값 포맷팅
     metrics = {k: _val(env.get(k), 4 if "ms" not in k else 2) for k in env.keys()}
     labels = {
-        "AP": "AP", "TP": "TP", "PS_dist": "PS_dist (0=정상)", "AS_corr": "AS_corr",
-        "AS_range": "AS_range", "AS_area": "AS_area",
-        "VOnT": "VOnT (ms)", "VOffT": "VOffT (ms)",
-        "Auto_On_ms": "Auto On (ms)", "Auto_Off_ms": "Auto Off (ms)", "Auto_Dur_ms": "Auto Duration (ms)",
+        "AP":"AP","TP":"TP","PS_dist":"PS_dist (0=정상)","AS_corr":"AS_corr",
+        "AS_range":"AS_range","AS_area":"AS_area",
+        "VOnT":"VOnT (ms)","VOffT":"VOffT (ms)",
+        "Auto_On_ms":"Auto On (ms)","Auto_Off_ms":"Auto Off (ms)","Auto_Dur_ms":"Auto Duration (ms)",
     }
 
-# ✅ 표시 항목 선택 (session_state 기반 유지)
-default = st.session_state.get("overview_keys", DEFAULT_KEYS)
+    default = st.session_state.get("overview_keys", DEFAULT_KEYS)
+    sel = st.multiselect(
+        "표시 항목",
+        DEFAULT_KEYS,
+        default=default,
+        key="ov_keys_ms"
+    )
 
-sel = st.multiselect(
-    "표시 항목",
-    DEFAULT_KEYS,
-    default=default,
-    key="ov_keys_ms"  # ← 반드시 추가
-)
+    st.session_state["overview_keys"] = sel
+    keys = sel
 
-st.session_state["overview_keys"] = sel
-keys = sel
-
-    # ✅ keys 업데이트 후 metric 출력
+    # ✅ 여기 붙여넣기
     rows = [keys[:4], keys[4:8], keys[8:12]]
     for row in rows:
         cols = st.columns(len(row)) if row else []
         for i, k in enumerate(row):
             with cols[i]:
                 st.metric(labels.get(k, k), metrics.get(k, "N/A"))
+
 
     # ---- QC(선택) 메시지 계산 (기존 유지) ----
     fps  = env.get("fps", np.nan)
@@ -1088,6 +1085,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
