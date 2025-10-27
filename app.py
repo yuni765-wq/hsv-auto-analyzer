@@ -561,6 +561,37 @@ def render_overview(env: dict, keys=None):
     st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
     if qc:
         st.info("QC: " + " · ".join(qc))
+# --- Quality Indicator (AP/TP/PS 기반 간단 휴리스틱) ---
+qi_label = "Low"
+qi_note = []
+score = 0
+try:
+    if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")) and env.get("AP") >= 0.70:
+        score += 1
+    else:
+        qi_note.append("AP<0.70")
+    if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")) and env.get("TP") >= 0.85:
+        score += 1
+    else:
+        qi_note.append("TP<0.85")
+    if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") <= 0.08:
+        score += 1
+    else:
+        qi_note.append("PS_dist>0.08")
+
+    if score >= 2:
+        qi_label = "High" if score == 3 else "Medium"
+except Exception:
+    pass
+
+# 뱃지 렌더
+color = {"High":"#16a34a","Medium":"#f59e0b","Low":"#dc2626"}[qi_label]
+st.markdown(
+    f"<div style='display:inline-block;padding:.35rem .6rem;border-radius:999px;background:{color};color:white;font-weight:600'>Quality: {qi_label}</div>",
+    unsafe_allow_html=True
+)
+if qi_note:
+    st.caption("Indicators: " + " · ".join(qi_note))
 
 # -------------------- Sidebar --------------------
 with st.sidebar:
@@ -1014,7 +1045,9 @@ if "Parameter Comparison" in tab_names:
 
 # -------------------- Footer --------------------
 st.markdown("---")
-st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
+
 
 
 
