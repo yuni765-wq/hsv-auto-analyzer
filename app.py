@@ -36,10 +36,15 @@ AUX_SUSTAIN_FR        = 45
 DEBOUNCE_FR           = 20
 
 # -------------------- App header --------------------
-st.set_page_config(page_title="HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Full)",
-                   layout="wide")
-st.title("HSV Auto Analyzer v3-alpha – Adaptive Clinical Engine (Full)")
-st.caption("Isaka × Lian | v2.5 energy + v3 PS/AS metrics + DualDetector(On/Off 분리) + Parameter Comparison(누적)")
+VERSION_LABEL = "HSV Auto Analyzer v3.1 – Adaptive Clinical Engine (Stable Release)"
+st.set_page_config(page_title=VERSION_LABEL, layout="wide")
+st.title(VERSION_LABEL)
+st.caption("Isaka × Lian | Stable preset + Stats auto-load + Quality indicator + On/Off notice")
+
+# 간단 런 로그
+if "run_log" not in st.session_state:
+    st.session_state["run_log"] = []
+st.session_state["run_log"].append(f"RUN_LOG: Preset Loaded = Stable_v3.1")
 
 # ============== Colors ==============
 COLOR_TOTAL   = "#FF0000"
@@ -987,4 +992,5 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+
 
