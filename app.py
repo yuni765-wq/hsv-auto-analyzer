@@ -581,6 +581,10 @@ def render_overview(env: dict, keys=None):
 AP_v   = to_scalar(AP)
 TP_v   = to_scalar(TP)
 PSD_v  = to_scalar(PS_dist)
+    
+AP_v  = to_scalar(AP)
+TP_v  = to_scalar(TP)
+PSD_v = to_scalar(PS_dist)
 
 qi_label = "Low"
 qi_note = []
@@ -1090,6 +1094,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
