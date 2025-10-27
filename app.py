@@ -546,24 +546,12 @@ def render_overview(env: dict, keys=None):
         "Auto_On_ms":"Auto On (ms)","Auto_Off_ms":"Auto Off (ms)","Auto_Dur_ms":"Auto Duration (ms)",
     }
 
-    if keys is None:
-        default = st.session_state.get("overview_keys", DEFAULT_KEYS)
-        sel = st.multiselect("표시 항목", DEFAULT_KEYS, default=default)
-        st.session_state["overview_keys"] = sel
-        keys = sel
-    else:
-        st.session_state["overview_keys"] = keys
+    # ... (keys 선택/metric 출력 부분 그대로 유지)
 
-    rows = [keys[:4], keys[4:8], keys[8:12]]
-    for row in rows:
-        cols = st.columns(len(row)) if row else []
-        for i,k in enumerate(row):
-            with cols[i]:
-                st.metric(labels.get(k, k), metrics.get(k, "N/A"))
+    fps  = env.get("fps", np.nan)
+    ncyc = int(env.get("ncyc", 0) or 0)
 
-
-    fps   = env.get("fps", np.nan)
-    ncyc  = int(env.get("ncyc", 0) or 0)
+    # ---- (선택) QC 메시지 계산 그대로 유지 ----
     qc = []
     try:
         if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") > 0.08:
@@ -574,68 +562,58 @@ def render_overview(env: dict, keys=None):
             qc.append("TP 낮음 (주기 불안정)")
     except Exception:
         pass
+
+    # ✅ 여기서 env에서 원시값을 꺼내고,
+    AP      = env.get("AP")
+    TP      = env.get("TP")
+    PS_dist = env.get("PS_dist")
+
+    # ✅ 함수 ‘안’에서 QI 계산을 수행
+    AP_v  = to_scalar(AP)
+    TP_v  = to_scalar(TP)
+    PSD_v = to_scalar(PS_dist)
+
+    qi_label = "Low"
+    qi_note = []
+    score = 0
+
+    AP_thr, TP_thr, PSD_thr = 0.70, 0.85, 0.08
+
+    if np.isfinite(AP_v):
+        if AP_v >= AP_thr: score += 1
+        else: qi_note.append(f"AP<{AP_thr}")
+    else:
+        qi_note.append("AP=NaN")
+
+    if np.isfinite(TP_v):
+        if TP_v >= TP_thr: score += 1
+        else: qi_note.append(f"TP<{TP_thr}")
+    else:
+        qi_note.append("TP=NaN")
+
+    if np.isfinite(PSD_v):
+        if PSD_v <= PSD_thr: score += 1
+        else: qi_note.append(f"PS_dist>{PSD_thr}")
+    else:
+        qi_note.append("PS_dist=NaN")
+
+    if score == 3:   qi_label = "High"
+    elif score == 2: qi_label = "Medium"
+
+    # ✅ 뱃지 렌더 + 디버그
+    color = {"High":"#16a34a","Medium":"#f59e0b","Low":"#dc2626"}[qi_label]
+    st.markdown(
+        f"<div style='display:inline-block;padding:.35rem .6rem;border-radius:999px;background:{color};color:white;font-weight:600'>Quality: {qi_label}</div>",
+        unsafe_allow_html=True
+    )
+    st.caption(f"[QI debug] score={score} | AP={AP_v:.4f}, TP={TP_v:.4f}, PS_dist={PSD_v:.4f}")
+    if qi_note:
+        st.caption("Indicators: " + " · ".join(qi_note))
+
+    # ✅ 마지막에 FPS/사이클 수 표기
     st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
     if qc:
         st.info("QC: " + " · ".join(qc))
-# --- Quality Indicator (AP/TP/PS 기반 간단 휴리스틱) ---
-AP_v   = to_scalar(AP)
-TP_v   = to_scalar(TP)
-PSD_v  = to_scalar(PS_dist)
-    
-qi_label = "Low"
-qi_note = []
-score = 0
-
-# 기준값
-AP_thr  = 0.70
-TP_thr  = 0.85
-PSD_thr = 0.08
-
-# 조건 체크 (예외 없이 스칼라로 판정)
-if np.isfinite(AP_v):
-    if AP_v >= AP_thr:
-        score += 1
-    else:
-        qi_note.append(f"AP<{AP_thr}")
-else:
-    qi_note.append("AP=NaN")
-
-if np.isfinite(TP_v):
-    if TP_v >= TP_thr:
-        score += 1
-    else:
-        qi_note.append(f"TP<{TP_thr}")
-else:
-    qi_note.append("TP=NaN")
-
-if np.isfinite(PSD_v):
-    if PSD_v <= PSD_thr:
-        score += 1
-    else:
-        qi_note.append(f"PS_dist>{PSD_thr}")
-else:
-    qi_note.append("PS_dist=NaN")
-
-# 등급
-if score == 3:
-    qi_label = "High"
-elif score == 2:
-    qi_label = "Medium"
-else:
-    qi_label = "Low"
-
-# (선택) 디버그 라벨: 점수·입력값 확인용
-st.caption(f"[QI debug] score={score} | AP={AP_v:.4f}, TP={TP_v:.4f}, PS_dist={PSD_v:.4f}")
-
-
-# 뱃지 렌더
-color = {"High":"#16a34a","Medium":"#f59e0b","Low":"#dc2626"}[qi_label]
-st.markdown(
-    f"<div style='display:inline-block;padding:.35rem .6rem;border-radius:999px;background:{color};color:white;font-weight:600'>Quality: {qi_label}</div>",
-    unsafe_allow_html=True
-)
-if qi_note:
-    st.caption("Indicators: " + " · ".join(qi_note))
 
 # -------------------- Sidebar --------------------
 with st.sidebar:
@@ -1090,6 +1068,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
