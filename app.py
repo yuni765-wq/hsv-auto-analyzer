@@ -564,34 +564,47 @@ def render_overview(env: dict, keys=None):
 
 # -------------------- Sidebar --------------------
 with st.sidebar:
-    st.markdown("### ⚙ Profile & Energy (기존 엔진)")
-    prof = st.selectbox("분석 프로필", ["Normal", "ULP", "SD", "Custom"], index=0)
-    pmap = {
-        "Normal": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac_on=0.70),
-        "ULP":    dict(baseline_s=0.06, k=1.50, M=40, W_ms=35.0, amp_frac_on=0.60),
-        "SD":     dict(baseline_s=0.06, k=1.75, M=50, W_ms=40.0, amp_frac_on=0.75),
-        "Custom": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac_on=0.70),
-    }
-    base = pmap.get(prof, pmap["Normal"])
-    baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=float(base["baseline_s"]), step=0.01)
-    k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00,  value=float(base["k"]), step=0.10)
-    M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=int(base["M"]), step=1)
-    W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=60.0,  value=float(base["W_ms"]), step=1.0)
-    amp_frac_on= st.slider("정상화 최소 진폭 비율 (Onset 전용)", 0.10, 0.90, float(base["amp_frac_on"]), 0.01)
-    st.caption("※ Offset은 N–D′ 기준으로 **0.80 고정**되어 DualDetector 내부에 적용됩니다.")
+    st.markdown("### 🧩 Preset")
+    advanced = st.toggle("Advanced (연구자 모드 열기)", value=False, help="일반 임상 사용자는 끄고 사용하세요. Stable v3.1 프리셋이 자동 적용됩니다.")
+
+    # Stable v3.1 프리셋(임상 기본): 슬라이더 숨김
+    STABLE_PRESET = dict(baseline_s=0.06, k=1.40, M=40, W_ms=40.0, amp_frac_on=0.70)  # v3.1 권장값
+    if not advanced:
+        st.success("Preset: Stable v3.1 (임상용) · 매개변수는 숨김 처리")
+        baseline_s = float(STABLE_PRESET["baseline_s"])
+        k          = float(STABLE_PRESET["k"])
+        M          = int(STABLE_PRESET["M"])
+        W_ms       = float(STABLE_PRESET["W_ms"])
+        amp_frac_on= float(STABLE_PRESET["amp_frac_on"])
+    else:
+        st.markdown("### ⚙ Energy & Profile (연구자)")
+        prof = st.selectbox("분석 프로필", ["Normal", "ULP", "SD", "Custom"], index=0)
+        pmap = {
+            "Normal": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac_on=0.70),
+            "ULP":    dict(baseline_s=0.06, k=1.50, M=40, W_ms=35.0, amp_frac_on=0.60),
+            "SD":     dict(baseline_s=0.06, k=1.75, M=50, W_ms=40.0, amp_frac_on=0.75),
+            "Custom": dict(baseline_s=0.06, k=1.10, M=40, W_ms=35.0, amp_frac_on=0.70),
+        }
+        base = pmap.get(prof, pmap["Normal"])
+        baseline_s = st.number_input("Baseline 구간(s)", min_value=0.05, max_value=0.50, value=float(base["baseline_s"]), step=0.01)
+        k          = st.number_input("임계 배수 k",      min_value=0.50, max_value=6.00,  value=float(base["k"]), step=0.10)
+        M          = st.number_input("연속 프레임 M (참고용)", min_value=1, max_value=150, value=int(base["M"]), step=1)
+        W_ms       = st.number_input("에너지 창(ms)",     min_value=2.0,  max_value=60.0,  value=float(base["W_ms"]), step=1.0)
+        amp_frac_on= st.slider("정상화 최소 진폭 비율 (Onset 전용)", 0.10, 0.90, float(base["amp_frac_on"]), 0.01)
+        st.caption("※ Offset은 N–D′ 기준으로 **0.80 고정**되어 DualDetector 내부에 적용됩니다.")
 
     st.markdown("---")
-    st.markdown("### 🧲 DualDetector 설정 (Onset / Offset 별도)")
+    st.markdown("### 🧲 DualDetector 설정 (Onset/Offset)")
     frame_ms = st.number_input("프레임 간격(ms)", min_value=0.10, max_value=5.0, value=0.66, step=0.01)
 
     st.markdown("**Onset 설정**")
-    onset_theta = st.slider("θ_on (A_norm)", 0.10, 0.90, 0.50, 0.01)
-    onset_min_amp = st.slider("min_amp_frac", 0.10, 0.90, 0.58, 0.01)
-    onset_AP_min = st.slider("AP_min", 0.50, 1.00, 0.85, 0.01)
-    onset_TP_min = st.slider("TP_min", 0.50, 1.00, 0.90, 0.01)
-    onset_AS_min = st.slider("AS_corr_min", 0.50, 1.00, 0.95, 0.01)
-    onset_PS_max = st.slider("PS_dist_max", 0.00, 0.20, 0.05, 0.01)
-    onset_sustain = st.number_input("onset_sustain (frames)", min_value=1, max_value=60, value=5, step=1)
+    onset_theta = st.slider("θ_on (A_norm)", 0.10, 0.90, 0.50, 0.01, disabled=not advanced)
+    onset_min_amp = st.slider("min_amp_frac", 0.10, 0.90, 0.58, 0.01, disabled=not advanced)
+    onset_AP_min = st.slider("AP_min", 0.50, 1.00, 0.85, 0.01, disabled=not advanced)
+    onset_TP_min = st.slider("TP_min", 0.50, 1.00, 0.90, 0.01, disabled=not advanced)
+    onset_AS_min = st.slider("AS_corr_min", 0.50, 1.00, 0.95, 0.01, disabled=not advanced)
+    onset_PS_max = st.slider("PS_dist_max", 0.00, 0.20, 0.05, 0.01, disabled=not advanced)
+    onset_sustain = st.number_input("onset_sustain (frames)", min_value=1, max_value=60, value=5, step=1, disabled=not advanced)
 
 adv = dict(baseline_s=baseline_s, k=k, M=M, W_ms=W_ms, amp_frac_on=amp_frac_on)
 
@@ -992,5 +1005,6 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+
 
 
