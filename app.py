@@ -568,52 +568,16 @@ def render_overview(env: dict, keys=None):
     except Exception:
         pass
 
-    # ✅ 여기서 env에서 원시값을 꺼내고,
-    AP      = env.get("AP")
-    TP      = env.get("TP")
-    PS_dist = env.get("PS_dist")
+qi = compute_quality_from_env(env)
+st.session_state['__qi_latest__'] = qi
 
-    # ✅ 함수 ‘안’에서 QI 계산을 수행
-    AP_v  = to_scalar(AP)
-    TP_v  = to_scalar(TP)
-    PSD_v = to_scalar(PS_dist)
+render_quality_banner(
+    st,
+    qi,
+    show_debug=st.session_state.get('debug_view', False),
+    pinned=False
+)
 
-    qi_label = "Low"
-    qi_note = []
-    score = 0
-
-    AP_thr, TP_thr, PSD_thr = 0.70, 0.85, 0.08
-
-    if np.isfinite(AP_v):
-        if AP_v >= AP_thr: score += 1
-        else: qi_note.append(f"AP<{AP_thr}")
-    else:
-        qi_note.append("AP=NaN")
-
-    if np.isfinite(TP_v):
-        if TP_v >= TP_thr: score += 1
-        else: qi_note.append(f"TP<{TP_thr}")
-    else:
-        qi_note.append("TP=NaN")
-
-    if np.isfinite(PSD_v):
-        if PSD_v <= PSD_thr: score += 1
-        else: qi_note.append(f"PS_dist>{PSD_thr}")
-    else:
-        qi_note.append("PS_dist=NaN")
-
-    if score == 3:   qi_label = "High"
-    elif score == 2: qi_label = "Medium"
-
-    # ✅ 뱃지 렌더 + 디버그
-    color = {"High":"#16a34a","Medium":"#f59e0b","Low":"#dc2626"}[qi_label]
-    st.markdown(
-        f"<div style='display:inline-block;padding:.35rem .6rem;border-radius:999px;background:{color};color:white;font-weight:600'>Quality: {qi_label}</div>",
-        unsafe_allow_html=True
-    )
-    st.caption(f"[QI debug] score={score} | AP={AP_v:.4f}, TP={TP_v:.4f}, PS_dist={PSD_v:.4f}")
-    if qi_note:
-        st.caption("Indicators: " + " · ".join(qi_note))
 
     # ✅ 마지막에 FPS/사이클 수 표기
     st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
@@ -1077,6 +1041,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
