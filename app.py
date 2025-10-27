@@ -21,7 +21,9 @@ try:
 except Exception:
     _HAS_SAVGOL = False
     _HAS_SCIPY = False
-
+from insight_v32 import (
+    VERSION_V32, compute_quality_from_env, render_quality_banner, inject_css
+)
 # -------------------- Global fixed settings (N–D′) --------------------
 AMP_FRAC_OFFSET_FIXED = 0.80      # <- Offset 전용 amp_frac 고정
 K_ND_PRIME            = 1.40
@@ -35,11 +37,14 @@ MAIN_SUSTAIN_FR       = 90
 AUX_SUSTAIN_FR        = 45
 DEBOUNCE_FR           = 20
 
-# -------------------- App header --------------------
-VERSION_LABEL = "HSV Auto Analyzer v3.1 – Adaptive Clinical Engine (Stable Release)"
+# === v3.2 페이지 타이틀/버전 라벨 ===
+VERSION_LABEL = VERSION_V32
 st.set_page_config(page_title=VERSION_LABEL, layout="wide")
 st.title(VERSION_LABEL)
-st.caption("Isaka × Lian | Stable preset + Stats auto-load + Quality indicator + On/Off notice")
+st.caption("Isaka × Lian | Stable preset + Stats auto-load + Quality indicator + Clinical notes + Pinned banner")
+
+# v3.2 고정배너용 CSS
+inject_css(st)
 
 # 간단 런 로그
 if "run_log" not in st.session_state:
@@ -1068,6 +1073,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
