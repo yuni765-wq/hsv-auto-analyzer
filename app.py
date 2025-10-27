@@ -543,57 +543,60 @@ def to_scalar(x):
         
 def render_overview(env: dict, keys=None):
     st.subheader("🩺 Overview")
+
+    # 값 포맷팅
     metrics = {k: _val(env.get(k), 4 if "ms" not in k else 2) for k in env.keys()}
     labels = {
-        "AP":"AP","TP":"TP","PS_dist":"PS_dist (0=정상)","AS_corr":"AS_corr",
-        "AS_range":"AS_range","AS_area":"AS_area",
-        "VOnT":"VOnT (ms)","VOffT":"VOffT (ms)",
-        "Auto_On_ms":"Auto On (ms)","Auto_Off_ms":"Auto Off (ms)","Auto_Dur_ms":"Auto Duration (ms)",
+        "AP": "AP", "TP": "TP", "PS_dist": "PS_dist (0=정상)", "AS_corr": "AS_corr",
+        "AS_range": "AS_range", "AS_area": "AS_area",
+        "VOnT": "VOnT (ms)", "VOffT": "VOffT (ms)",
+        "Auto_On_ms": "Auto On (ms)", "Auto_Off_ms": "Auto Off (ms)", "Auto_Dur_ms": "Auto Duration (ms)",
     }
 
-    # ... (keys 선택/metric 출력 부분 그대로 유지)
+    # 표시 항목 선택(기존 로직 유지)
+    default = st.session_state.get("overview_keys", DEFAULT_KEYS)
+    if keys is None:
+        sel = st.multiselect("표시 항목", DEFAULT_KEYS, default=default)
+        st.session_state["overview_keys"] = sel
+        keys = sel
+    else:
+        st.session_state["overview_keys"] = keys
 
+    rows = [keys[:4], keys[4:8], keys[8:12]]
+    for row in rows:
+        cols = st.columns(len(row)) if row else []
+        for i, k in enumerate(row):
+            with cols[i]:
+                st.metric(labels.get(k, k), metrics.get(k, "N/A"))
+
+    # ---- QC(선택) 메시지 계산 (기존 유지) ----
     fps  = env.get("fps", np.nan)
     ncyc = int(env.get("ncyc", 0) or 0)
 
-    # ---- (선택) QC 메시지 계산 그대로 유지 ----
     qc = []
     try:
-        if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") > 0.08:
+        if isinstance(env.get("PS_dist"), (int, float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") > 0.08:
             qc.append("PS_dist↑ (위상 불일치 가능)")
-        if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")) and env.get("AP") < 0.70:
+        if isinstance(env.get("AP"), (int, float)) and np.isfinite(env.get("AP")) and env.get("AP") < 0.70:
             qc.append("AP 낮음 (진폭 불안정)")
-        if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")) and env.get("TP") < 0.85:
+        if isinstance(env.get("TP"), (int, float)) and np.isfinite(env.get("TP")) and env.get("TP") < 0.85:
             qc.append("TP 낮음 (주기 불안정)")
     except Exception:
         pass
 
-# ✅ render_overview(env) 안
-qi = compute_quality_from_env(env)
-st.session_state['__qi_latest__'] = qi
+    # ✅ 여기서 QI 계산 + 세션에 저장 + (비고정) 배지 렌더
+    qi = compute_quality_from_env(env)
+    st.session_state['__qi_latest__'] = qi
 
-render_quality_banner(
-    st, qi,
-    show_debug=st.session_state.get('debug_view', False),
-    pinned=False
-)
-
-# ✅ 탭 만들기 직전에, 계산 없이 세션에서 가져와 렌더만!
-qi_latest = st.session_state.get('__qi_latest__')
-if qi_latest is not None:
     render_quality_banner(
-        st,
-        qi_latest,
+        st, qi,
         show_debug=st.session_state.get('debug_view', False),
-        pinned=True
+        pinned=False
     )
 
-# ✅ 이제 Tabs 생성!
-tabs = st.tabs(["Overview", "Visualization", "Batch Offset", "Parameter Comparison"])
-
-    # ✅ 마지막에 FPS/사이클 수 표기
-st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
-if qc:
+    # ✅ 마지막에 FPS/사이클 수 & QC 표기
+    st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps), 1)} | 검출된 사이클 수: {ncyc}")
+    if qc:
         st.info("QC: " + " · ".join(qc))
 
 # -------------------- Sidebar --------------------
@@ -702,16 +705,43 @@ if uploaded is not None:
     Auto_Off_ms = det_res.get("offset_time_ms")
     Auto_Dur_ms = det_res.get("duration_ms")
 
-# -------------------- Tabs --------------------
-# 업로드 상태에 따라 탭 구성. Stats 탭을 최우선.
+# ---------------- Tabs 생성 및 Overview 실행 ----------------
 if uploaded is None:
-    st.info("⬆️ 상단에서 단일 케이스 파일을 업로드하면 분석/시각화 탭이 활성화됩니다.")
+    st.info("📌 CSV/Excel 형식의 데이터를 업로드하면 분석/시각화 기능이 활성화됩니다.")
     st.markdown("---")
-    tab_names = ["Parameter Comparison", "Batch Offset"]  # 업로드 없이도 두 탭 사용 가능
+    tab_names = ["Parameter Comparison", "Batch Offset"]  # 업로드가 없어도 일부 탭 사용 가능
 else:
-    tab_names = ["Stats", "Overview", "Visualization", "Batch Offset", "Parameter Comparison"]
+    tab_names = ["Overview", "Visualization", "Batch Offset", "Parameter Comparison"]
 
+# ✅ 1) pinned 배지를 넣을 상단 영역 확보
+top_banner = st.container()
+
+# ✅ 2) 탭 생성
 tabs = st.tabs(tab_names)
+
+# ✅ 3) Overview 탭이 존재한다면 → 먼저 실행
+if "Overview" in tab_names and uploaded is not None:
+    with tabs[tab_names.index("Overview")]:
+        env = dict(
+            AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
+            AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
+            Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
+        )
+        render_overview(env)  # ✅ 여기서 QI 계산됨 & 세션에 저장됨
+        st.dataframe(summary, use_container_width=True)
+
+# ✅ 4) pinned 배지를 "탭 위"에 1번만 렌더
+qi_latest = st.session_state.get("__qi_latest__")
+with top_banner:
+    if qi_latest is not None:
+        render_quality_banner(
+            st,
+            qi_latest,
+            show_debug=st.session_state.get("debug_view", False),
+            pinned=True
+        )
+
+# 이후 기존 나머지 탭 콘텐트 유지
 
 # ---- Overview ----
 if "Overview" in tab_names and uploaded is not None:
@@ -1053,6 +1083,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
