@@ -685,6 +685,14 @@ if "Overview" in tab_names and uploaded is not None:
         )
         render_overview(env)
         st.dataframe(summary, use_container_width=True)
+# ---- Onset/Offset 안내 ----
+st.markdown(
+    """
+    > ⚠️ **Onset/Offset 자동검출 주의**  
+    > 잔류소음, 비대칭 진동, 보간 오차 등에 따라 자동 검출값은 수동치와 ±10–30 ms 범위의 차이가 발생할 수 있습니다.  
+    > 임상 해석 시, 병리군(특히 ULP/SD)은 신뢰도 저하가 자연스럽게 나타날 수 있으니 함께 제공되는 **Quality Indicator**를 참고하세요.
+    """.strip()
+)
 
 # ---- Visualization ----
 def make_total_plot(t, total_s, cycles, i_move, i_steady, i_last, i_end, Auto_On_ms, Auto_Off_ms, zoom="전체"):
@@ -865,8 +873,8 @@ if "Visualization" in tab_names and uploaded is not None:
             )
 
 
-# ---- Validation ----
-if "Validation" in tab_names and uploaded is not None:
+# ---- Stats ----
+if "stats" in tab_names and uploaded is not None:
     with tabs[tab_names.index("Validation")]:
         st.subheader("📊 Validation (RMSE / MAE / Bias)")
         st.info("자동 vs 수동 측정치 정량검증은 이 탭에서 확장됩니다. (배치 집계는 Batch Offset 탭)")
@@ -1007,6 +1015,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+
 
 
 
