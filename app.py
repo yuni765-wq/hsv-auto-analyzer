@@ -568,23 +568,25 @@ def render_overview(env: dict, keys=None):
     except Exception:
         pass
 
-# ✅ v3.2 QI 계산 + 임상 메모 표시 (함수 내부)
+# ✅ render_overview(env) 안
 qi = compute_quality_from_env(env)
 st.session_state['__qi_latest__'] = qi
+
 render_quality_banner(
     st, qi,
     show_debug=st.session_state.get('debug_view', False),
     pinned=False
 )
 
-# ✅ pinned Quality 배지: 함수 밖, 탭 밖에서 한 번만!
+# ✅ 탭 만들기 직전에, 계산 없이 세션에서 가져와 렌더만!
 qi_latest = st.session_state.get('__qi_latest__')
-render_quality_banner(
-    st,
-    qi_latest,
-    show_debug=st.session_state.get('debug_view', False),
-    pinned=True
-)
+if qi_latest is not None:
+    render_quality_banner(
+        st,
+        qi_latest,
+        show_debug=st.session_state.get('debug_view', False),
+        pinned=True
+    )
 
 # ✅ 이제 Tabs 생성!
 tabs = st.tabs(["Overview", "Visualization", "Batch Offset", "Parameter Comparison"])
@@ -1051,6 +1053,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
