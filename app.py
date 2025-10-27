@@ -545,6 +545,20 @@ def render_overview(env: dict, keys=None):
         for i,k in enumerate(row):
             with cols[i]:
                 st.metric(labels.get(k, k), metrics.get(k, "N/A"))
+# 스칼라 변환 헬퍼
+def to_scalar(x):
+    """넘어온 값이 배열/시리즈여도 안전하게 float으로 변환"""
+    try:
+        if x is None:
+            return np.nan
+        if hasattr(x, "__len__") and not isinstance(x, (str, bytes)):
+            try:
+                x = x.item()
+            except Exception:
+                x = x[0]
+        return float(x)
+    except Exception:
+        return np.nan
 
     fps   = env.get("fps", np.nan)
     ncyc  = int(env.get("ncyc", 0) or 0)
@@ -1059,6 +1073,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
