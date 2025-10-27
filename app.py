@@ -553,14 +553,18 @@ def render_overview(env: dict, keys=None):
         "Auto_On_ms": "Auto On (ms)", "Auto_Off_ms": "Auto Off (ms)", "Auto_Dur_ms": "Auto Duration (ms)",
     }
 
-    # 표시 항목 선택(기존 로직 유지)
-    default = st.session_state.get("overview_keys", DEFAULT_KEYS)
-    if keys is None:
-        sel = st.multiselect("표시 항목", DEFAULT_KEYS, default=default)
-        st.session_state["overview_keys"] = sel
-        keys = sel
-    else:
-        st.session_state["overview_keys"] = keys
+# ✅ 표시 항목 선택 (session_state 기반 유지)
+default = st.session_state.get("overview_keys", DEFAULT_KEYS)
+
+sel = st.multiselect(
+    "표시 항목",
+    DEFAULT_KEYS,
+    default=default,
+    key="ov_keys_ms"  # ← 반드시 추가
+)
+
+st.session_state["overview_keys"] = sel
+keys = sel
 
     rows = [keys[:4], keys[4:8], keys[8:12]]
     for row in rows:
@@ -1083,6 +1087,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
