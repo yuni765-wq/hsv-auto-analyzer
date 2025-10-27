@@ -566,6 +566,7 @@ sel = st.multiselect(
 st.session_state["overview_keys"] = sel
 keys = sel
 
+    # ✅ keys 업데이트 후 metric 출력
     rows = [keys[:4], keys[4:8], keys[8:12]]
     for row in rows:
         cols = st.columns(len(row)) if row else []
@@ -1087,6 +1088,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
