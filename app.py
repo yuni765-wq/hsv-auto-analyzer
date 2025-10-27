@@ -566,21 +566,34 @@ qi_label = "Low"
 qi_note = []
 score = 0
 try:
-    if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")) and env.get("AP") >= 0.70:
-        score += 1
-    else:
-        qi_note.append("AP<0.70")
-    if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")) and env.get("TP") >= 0.85:
-        score += 1
-    else:
-        qi_note.append("TP<0.85")
-    if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")) and env.get("PS_dist") <= 0.08:
-        score += 1
-    else:
-        qi_note.append("PS_dist>0.08")
+    # AP: 주기 안정성
+    if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")):
+        if env.get("AP") >= 0.70:
+            score += 1
+        else:
+            qi_note.append("AP<0.70")
 
-    if score >= 2:
-        qi_label = "High" if score == 3 else "Medium"
+    # TP: 시간 안정성
+    if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")):
+        if env.get("TP") >= 0.85:
+            score += 1
+        else:
+            qi_note.append("TP<0.85")
+
+    # PS_dist: 좌우 위상 차이
+    if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")):
+        if env.get("PS_dist") <= 0.08:
+            score += 1
+        else:
+            qi_note.append("PS_dist>0.08")
+
+    # 점수 기반 등급
+    if score == 3:
+        qi_label = "High"
+    elif score == 2:
+        qi_label = "Medium"
+    else:
+        qi_label = "Low"
 except Exception:
     pass
 
@@ -1046,6 +1059,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
