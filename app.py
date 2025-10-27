@@ -11,10 +11,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
-from insight_v32 import (
-    VERSION_V32, compute_quality_from_env,
-    render_quality_banner, inject_css
-)
+
 # optional savgol
 try:
     from scipy.signal import savgol_filter
@@ -571,16 +568,26 @@ def render_overview(env: dict, keys=None):
     except Exception:
         pass
 
+# ✅ v3.2 QI 계산 + 임상 메모 표시 (함수 내부)
 qi = compute_quality_from_env(env)
 st.session_state['__qi_latest__'] = qi
-
 render_quality_banner(
-    st,
-    qi,
+    st, qi,
     show_debug=st.session_state.get('debug_view', False),
     pinned=False
 )
 
+# ✅ pinned Quality 배지: 함수 밖, 탭 밖에서 한 번만!
+qi_latest = st.session_state.get('__qi_latest__')
+render_quality_banner(
+    st,
+    qi_latest,
+    show_debug=st.session_state.get('debug_view', False),
+    pinned=True
+)
+
+# ✅ 이제 Tabs 생성!
+tabs = st.tabs(["Overview", "Visualization", "Batch Offset", "Parameter Comparison"])
 
     # ✅ 마지막에 FPS/사이클 수 표기
 st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
@@ -1044,6 +1051,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
