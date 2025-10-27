@@ -11,7 +11,10 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
-
+from insight_v32 import (
+    VERSION_V32, compute_quality_from_env,
+    render_quality_banner, inject_css
+)
 # optional savgol
 try:
     from scipy.signal import savgol_filter
@@ -1041,6 +1044,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
