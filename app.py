@@ -665,11 +665,13 @@ if uploaded is not None:
     Auto_Dur_ms = det_res.get("duration_ms")
 
 # -------------------- Tabs --------------------
-tab_names = ["Overview", "Visualization", "Validation", "Batch Offset", "Parameter Comparison"]
+# 업로드 상태에 따라 탭 구성. Stats 탭을 최우선.
 if uploaded is None:
     st.info("⬆️ 상단에서 단일 케이스 파일을 업로드하면 분석/시각화 탭이 활성화됩니다.")
     st.markdown("---")
     tab_names = ["Parameter Comparison", "Batch Offset"]  # 업로드 없이도 두 탭 사용 가능
+else:
+    tab_names = ["Stats", "Overview", "Visualization", "Batch Offset", "Parameter Comparison"]
 
 tabs = st.tabs(tab_names)
 
@@ -1005,6 +1007,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3α")
+
 
 
 
