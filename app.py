@@ -580,8 +580,8 @@ render_quality_banner(
 
 
     # ✅ 마지막에 FPS/사이클 수 표기
-    st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
-    if qc:
+st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps),1)} | 검출된 사이클 수: {ncyc}")
+if qc:
         st.info("QC: " + " · ".join(qc))
 
 # -------------------- Sidebar --------------------
@@ -1041,6 +1041,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
