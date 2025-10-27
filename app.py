@@ -745,16 +745,6 @@ with top_banner:
 
 # 이후 기존 나머지 탭 콘텐트 유지
 
-# ---- Overview ----
-if "Overview" in tab_names and uploaded is not None:
-    with tabs[tab_names.index("Overview")]:
-        env = dict(
-            AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
-            AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
-            Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
-        )
-        render_overview(env)
-        st.dataframe(summary, use_container_width=True)
 # ---- Onset/Offset 안내 ----
 st.markdown(
     """
@@ -1085,6 +1075,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
