@@ -576,40 +576,55 @@ def to_scalar(x):
     if qc:
         st.info("QC: " + " · ".join(qc))
 # --- Quality Indicator (AP/TP/PS 기반 간단 휴리스틱) ---
+AP_v   = to_scalar(AP)
+TP_v   = to_scalar(TP)
+PSD_v  = to_scalar(PS_dist)
+
 qi_label = "Low"
 qi_note = []
 score = 0
-try:
-    # AP: 주기 안정성
-    if isinstance(env.get("AP"), (int,float)) and np.isfinite(env.get("AP")):
-        if env.get("AP") >= 0.70:
-            score += 1
-        else:
-            qi_note.append("AP<0.70")
 
-    # TP: 시간 안정성
-    if isinstance(env.get("TP"), (int,float)) and np.isfinite(env.get("TP")):
-        if env.get("TP") >= 0.85:
-            score += 1
-        else:
-            qi_note.append("TP<0.85")
+# 기준값
+AP_thr  = 0.70
+TP_thr  = 0.85
+PSD_thr = 0.08
 
-    # PS_dist: 좌우 위상 차이
-    if isinstance(env.get("PS_dist"), (int,float)) and np.isfinite(env.get("PS_dist")):
-        if env.get("PS_dist") <= 0.08:
-            score += 1
-        else:
-            qi_note.append("PS_dist>0.08")
-
-    # 점수 기반 등급
-    if score == 3:
-        qi_label = "High"
-    elif score == 2:
-        qi_label = "Medium"
+# 조건 체크 (예외 없이 스칼라로 판정)
+if np.isfinite(AP_v):
+    if AP_v >= AP_thr:
+        score += 1
     else:
-        qi_label = "Low"
-except Exception:
-    pass
+        qi_note.append(f"AP<{AP_thr}")
+else:
+    qi_note.append("AP=NaN")
+
+if np.isfinite(TP_v):
+    if TP_v >= TP_thr:
+        score += 1
+    else:
+        qi_note.append(f"TP<{TP_thr}")
+else:
+    qi_note.append("TP=NaN")
+
+if np.isfinite(PSD_v):
+    if PSD_v <= PSD_thr:
+        score += 1
+    else:
+        qi_note.append(f"PS_dist>{PSD_thr}")
+else:
+    qi_note.append("PS_dist=NaN")
+
+# 등급
+if score == 3:
+    qi_label = "High"
+elif score == 2:
+    qi_label = "Medium"
+else:
+    qi_label = "Low"
+
+# (선택) 디버그 라벨: 점수·입력값 확인용
+st.caption(f"[QI debug] score={score} | AP={AP_v:.4f}, TP={TP_v:.4f}, PS_dist={PSD_v:.4f}")
+
 
 # 뱃지 렌더
 color = {"High":"#16a34a","Medium":"#f59e0b","Low":"#dc2626"}[qi_label]
@@ -1073,6 +1088,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
