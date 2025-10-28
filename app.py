@@ -966,7 +966,10 @@ def render_v32(viz: dict):
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Amplitude (a.u.)")
-    ax.legend(loc="upper right")
+
+    # ✅ Tremor 배지와 겹치지 않도록 개선됨!
+    ax.legend(loc="lower right", framealpha=0.85)
+
     st.pyplot(fig)
 
 def make_total_plot(t, total_s, cycles, i_move, i_steady, i_last, i_end, Auto_On_ms, Auto_Off_ms, zoom="전체"):
@@ -1297,6 +1300,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
