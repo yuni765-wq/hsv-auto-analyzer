@@ -612,54 +612,6 @@ def analyze(df: pd.DataFrame, adv: dict):
         tremor_ratio = np.nan
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
-# ===============================================
-# compute_oid : OID = VOffT_env − GOT (ms)
-# ===============================================
-def compute_oid(got_ms, vofft_ms):
-    if not is_num(got_ms) or not is_num(vofft_ms):
-        return np.nan
-    # 필요 시 한 번 더 float 캐스팅
-    got = float(got_ms)
-    off = float(vofft_ms)
-    return off - got
-
-    # 8-3) OID
-    try:
-        oid_ms = compute_oid(got_ms, vofft_ms)   # compute_oid는 _is_num 사용 버전
-    except Exception as e:
-        oid_ms = np.nan
-        err_msgs.append(f"[oid] {type(e).__name__}: {e}")
-
-    # 8-4) TremorIndex (안정성 버전)
-    try:
-        if env_v32 is not None:
-            from scipy.signal import welch
-            sig = np.asarray(env_v32, float)
-            sig = np.nan_to_num(sig, nan=0.0)
-            L = int(sig.size)
-            if L < 64:
-                tremor_ratio = np.nan
-                err_msgs.append("[tremor] short signal (<64 samples)")
-            else:
-                import math
-                target_len = max(32, int(fps * 0.35))
-                win_pow    = int(math.log2(max(32, min(L, target_len))))
-                nperseg    = max(32, min(2 ** win_pow, L))
-                noverlap   = min(nperseg // 2, nperseg - 1, max(0, L // 4))
-                if noverlap >= nperseg:
-                    noverlap = max(0, nperseg // 2 - 1)
-                f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
-                tgt = ((f >= 4.0) & (f <= 5.0))
-                tot = ((f >= 1.0) & (f <= 20.0))
-                num = np.trapz(Pxx[tgt], f[tgt]) if np.any(tgt) else 0.0
-                den = np.trapz(Pxx[tot], f[tot]) if np.any(tot) else 0.0
-                tremor_ratio = (num / den) if (den > 0 and np.isfinite(num)) else np.nan
-        else:
-            tremor_ratio = np.nan
-    except Exception as e:
-        tremor_ratio = np.nan
-        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
-
     # 9) 결과표 구성 ------------------------------------------------------------
     try:
         summary = pd.DataFrame({
@@ -1365,6 +1317,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
