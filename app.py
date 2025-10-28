@@ -568,10 +568,10 @@ viz = dict(
     TremorIndex=tremor_ratio,
 )
 
-extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
+    extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
 
-return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
-
+    return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
+    
 
 # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT","Auto_On_ms","Auto_Off_ms","Auto_Dur_ms"]
@@ -1135,6 +1135,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
