@@ -24,6 +24,20 @@ except Exception:
 from insight_v32 import (
     VERSION_V32, compute_quality_from_env, render_quality_banner, inject_css
 )
+from metrics import (
+    compute_envelope,
+    detect_gat_vont_got_vofft,
+    compute_oid,
+    tremor_index_psd,
+)
+REQUIRED_FUNCS = [
+    compute_envelope,
+    detect_gat_vont_got_vofft,
+    compute_oid,
+    tremor_index_psd,
+]
+assert all(callable(f) for f in REQUIRED_FUNCS), "metrics functions not loaded"
+
 # -------------------- Global fixed settings (N–D′) --------------------
 AMP_FRAC_OFFSET_FIXED = 0.80      # <- Offset 전용 amp_frac 고정
 K_ND_PRIME            = 1.40
@@ -1075,6 +1089,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
