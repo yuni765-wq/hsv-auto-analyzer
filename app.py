@@ -568,9 +568,9 @@ viz = dict(
     TremorIndex=tremor_ratio,
 )
 
-    extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
-
-    return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
+extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
+ 
+return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
     
 
 # -------------------- Overview renderer --------------------
@@ -1135,6 +1135,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
