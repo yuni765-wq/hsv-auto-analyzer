@@ -522,7 +522,7 @@ except Exception as e:
     tremor_ratio = np.nan
 
     summary = pd.DataFrame({
-    "Parameter": [
+        "Parameter": [
             "Amplitude Periodicity (AP)",
             "Time Periodicity (TP)",
             "AS (legacy, median p2p)",
@@ -531,21 +531,16 @@ except Exception as e:
             "AS_corr (shape)",
             "PS_sim (1=good)",
             "PS_dist (0=normal)",
-            "Voice Onset Time (VOnT, ms)",      # 기존 energy 기반
-            "Voice Offset Time (VOffT, ms)",    # 기존 energy 기반
-            "GAT (ms)",                         # ★ 신규
-            "GOT (ms)",                         # ★ 신규
-            "VOnT_env (ms)",                    # ★ 신규: envelope 기반
-            "VOffT_env (ms)",                   # ★ 신규: envelope 기반
-            "OID = VOffT_env − GOT (ms)",       # ★ 신규
-            "Tremor Index (4–5 Hz, env)"        # ★ 신규
-    ],
-    "Value": [
-        AP, TP, AS_legacy, AS_range, AS_area, AS_corr, PS_sim, PS_dist,
-        VOnT, VOffT,
-        gat_ms, got_ms, vont_ms_env, vofft_ms, oid_ms, tremor_ratio
-    ]
-})
+            "Voice Onset Time (VOnT, ms)",
+            "Voice Offset Time (VOffT, ms)",
+            "GAT (ms)", "GOT (ms)", "VOnT_env (ms)", "VOffT_env (ms)", "OID = VOffT_env − GOT (ms)",
+            "Tremor Index (4–5 Hz, env)"
+        ],
+        "Value": [
+            AP, TP, AS_legacy, AS_range, AS_area, AS_corr, PS_sim, PS_dist,
+            VOnT, VOffT, gat_ms, got_ms, vont_ms_env, vofft_ms, oid_ms, tremor_ratio
+        ]
+    })
 
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
@@ -557,19 +552,15 @@ except Exception as e:
         AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist,
         VOnT=VOnT, VOffT=VOffT,
-
-    # ===== v3.2 신규 시각화 항목 =====
-    env_v32=env_v32 if 'env_v32' in locals() else None,
-    GAT_ms=gat_ms,
-    GOT_ms=got_ms,
-    VOnT_env_ms=vont_ms_env,
-    VOffT_env_ms=vofft_ms,
-    OID_ms=oid_ms,
-    TremorIndex=tremor_ratio,
-)
+        env_v32=env_v32 if 'env_v32' in locals() else None,
+        GAT_ms=gat_ms, GOT_ms=got_ms,
+        VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
+        OID_ms=oid_ms, TremorIndex=tremor_ratio,
+    )
 
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
+
     
 
 # -------------------- Overview renderer --------------------
@@ -1134,6 +1125,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
