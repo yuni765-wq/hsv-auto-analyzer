@@ -569,8 +569,8 @@ def analyze(df: pd.DataFrame, adv: dict):
                 np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
                 if np.any(tgt) and np.any(tot) else np.nan
             )
-        else:
-            tremor_ratio = np.nan
+    else:
+        tremor_ratio = np.nan
 
     except Exception as e:
         tremor_ratio = np.nan
@@ -1195,6 +1195,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
