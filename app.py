@@ -356,12 +356,15 @@ def _as_range_area_corr(left: np.ndarray, right: np.ndarray, cycles: list) -> tu
 
 # -------------------- Analyzer (v2.5 energy + v3 metrics) --------------------
 def analyze(df: pd.DataFrame, adv: dict):
+    # 0) 입력 컬럼 정리
     cols = _norm_cols(df.columns.tolist())
     df = df.copy()
     df.columns = cols
+
     def pick(key):
         for c in cols:
-            if key in c: return c
+            if key in c:
+                return c
         return None
 
     time_col   = pick("time")
@@ -375,8 +378,9 @@ def analyze(df: pd.DataFrame, adv: dict):
         empty = pd.DataFrame()
         return pd.DataFrame({"Parameter": [], "Value": []}), empty, dict(fps=np.nan, n_cycles=0, viz={})
 
+    # 1) 시계열 준비 (초 단위)
     t = df[time_col].astype(float).values
-    if np.nanmax(t) > 10.0:  # ms → s
+    if np.nanmax(t) > 10.0:
         t = t / 1000.0
 
     if total_col is not None:
@@ -390,37 +394,38 @@ def analyze(df: pd.DataFrame, adv: dict):
     left  = df[left_col].astype(float).values  if left_col  else None
     right = df[right_col].astype(float).values if right_col else None
 
-    # fps
+    # 2) fps
     dt = np.median(np.diff(t)) if len(t) > 1 else 0.0
     fps = (1.0 / dt) if dt > 0 else 1500.0
 
-    # smoothing
+    # 3) smoothing
     total_s = _smooth(total, fps)
     left_s  = _smooth(left, fps)  if left  is not None else None
     right_s = _smooth(right, fps) if right is not None else None
 
-    # cycles
+    # 4) cycles (피크 구간)
     min_frames = max(int(0.002 * fps), 5)
     cycles = _build_cycles(t, total_s, min_frames=min_frames)
 
-    # core metrics
+    # 5) v3 메트릭 (AP/TP/AS/PS)
     AP, TP = _ap_tp(t, total_s, cycles)
     AS_legacy = _as_legacy(left_s, right_s, cycles)
     PS_dist, PS_sim = _ps_dist(left_s, right_s, t, cycles)
     AS_range, AS_area, AS_corr = _as_range_area_corr(left_s, right_s, cycles)
 
-    # ---------- energy-based (v2.5 style) ----------
+    # 6) v2.5 energy 기반 onset/offset 탐지 파이프
     W_ms       = float(adv.get("W_ms", WINDOW_ENERGY_MS))
     baseline_s = float(adv.get("baseline_s", 0.06))
     k          = float(adv.get("k", K_ND_PRIME))
-    amp_frac_on  = float(adv.get("amp_frac_on", 0.70))      # Onset 전용
-    amp_frac_off = AMP_FRAC_OFFSET_FIXED                    # Offset 전용 고정
+    amp_frac_on  = float(adv.get("amp_frac_on", 0.70))          # Onset 전용
+    amp_frac_off = AMP_FRAC_OFFSET_FIXED                         # Offset 전용(고정)
 
     hysteresis_ratio = 0.70
     min_event_ms     = 40.0
     refractory_ms    = 30.0
 
     W = max(int(round((W_ms / 1000.0) * fps)), 3)
+
     def _energy(trace):
         return _moving_rms(np.abs(np.diff(trace, prepend=trace[0])), W)
 
@@ -431,6 +436,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     E_off = _energy(offset_series)
 
     nB = max(int(round(baseline_s * fps)), 5)
+
     def _thr(E):
         base = E[:min(nB, len(E))]
         mu0 = float(np.mean(base)) if len(base) else 0.0
@@ -438,6 +444,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         Th  = mu0 + k * s0
         Tl  = hysteresis_ratio * Th
         return Th, Tl
+
     Th_on,  Tl_on  = _thr(E_on)
     Th_off, Tl_off = _thr(E_off)
 
@@ -464,7 +471,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     on_starts, on_ends   = _hyst_detect(E_on,  Th_on,  Tl_on)
     off_starts, off_ends = _hyst_detect(E_off, Th_off, Tl_off)
 
-    # ---- steady detection: onset/offset amp_frac 분리 ----
+    # 7) steady 구간 기반 VOnT/VOffT 계산
     i_move = int(on_starts[0]) if len(on_starts) else (cycles[0][0] if len(cycles) else None)
     VOnT = np.nan; VOffT = np.nan
     i_steady = None; i_last = None; i_end = None
@@ -472,55 +479,51 @@ def analyze(df: pd.DataFrame, adv: dict):
     if len(cycles) >= 1 and i_move is not None:
         g_amp = float(np.nanmax([np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]) for s, e in cycles])) if cycles else 0.0
 
-        # first steady after move — onset uses amp_frac_on
+        # onset: 움직임 이후 첫 steady (amp_frac_on)
         for s, e in cycles:
-            if s <= i_move:   # after move
+            if s <= i_move:
                 continue
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp <= 0 or (amp >= amp_frac_on * g_amp):
                 i_steady = int(s); break
 
-        # last steady — offset uses amp_frac_off (고정)
+        # offset: 마지막 steady (amp_frac_off)
         for s, e in reversed(cycles):
             amp = float(np.nanmax(total_s[s:e]) - np.nanmin(total_s[s:e]))
             if g_amp <= 0 or (amp >= amp_frac_off * g_amp):
                 i_last = int(s); break
         if i_last is None:
-            i_last = cycles[-1][0] if cycles else (len(t)-1)
+            i_last = cycles[-1][0] if cycles else (len(t) - 1)
 
-        # end from energy ends
+        # offset 끝점: energy 기반 종료점
         idxs = np.where(off_ends >= i_last)[0] if len(off_ends) else []
-        i_end = int(off_ends[idxs[-1]]) if len(idxs) else (cycles[-1][1] if cycles else (len(t)-1))
+        i_end = int(off_ends[idxs[-1]]) if len(idxs) else (cycles[-1][1] if cycles else (len(t) - 1))
 
-        t_move   = float(t[i_move]) if i_move   is not None else np.nan
+        t_move   = float(t[i_move])   if i_move   is not None else np.nan
         t_steady = float(t[i_steady]) if i_steady is not None else np.nan
-        t_last   = float(t[i_last]) if i_last   is not None else np.nan
+        t_last   = float(t[i_last])   if i_last   is not None else np.nan
         t_end    = float(t[min(i_end, len(t)-1)]) if i_end is not None else np.nan
 
         VOnT  = (t_steady - t_move) * 1000.0 if (np.isfinite(t_steady) and np.isfinite(t_move)) else np.nan
-        VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end) and np.isfinite(t_last)) else np.nan
-   
-# ===== v3.2: envelope 기반 GAT/GOT + OID + Tremor 추가 =====
-# total_s: 이미 smoothing된 total 파형 (위에서 만든 것)
-# fps    : 위에서 계산한 프레임레이트(Hz)
+        VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end)    and np.isfinite(t_last)) else np.nan
 
-try:
-    env_v32 = compute_envelope(total_s, fps)  # Hilbert + Savitzky-Golay
-    gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
-        env_v32, fps,
-        k=1.0,           # baseline + k·σ
-        min_run_ms=12,   # 연속성 요건
-        win_cycles=4,    # 주기 안정성 윈도
-        cv_max=0.12      # 변동계수 허용치
-    )
-    oid_ms = compute_oid(got_ms, vofft_ms)
-    tremor_ratio = tremor_index_psd(env_v32, fps, band=(4.0, 5.0), total=(1.0, 20.0))
+    # 8) v3.2 envelope 기반 GAT/GOT + OID + Tremor
+    try:
+        env_v32 = compute_envelope(total_s, fps)  # Hilbert + Savitzky-Golay
+        gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
+            env_v32, fps,
+            k=1.0,           # baseline + k·σ
+            min_run_ms=12,   # 연속성 요건
+            win_cycles=4,    # 주기 안정성 윈도
+            cv_max=0.12      # 변동계수 허용치
+        )
+        oid_ms = compute_oid(got_ms, vofft_ms)
+        tremor_ratio = tremor_index_psd(env_v32, fps, band=(4.0, 5.0), total=(1.0, 20.0))
+    except Exception:
+        gat_ms = vont_ms_env = got_ms = vofft_ms = oid_ms = np.nan
+        tremor_ratio = np.nan
 
-except Exception as e:
-    # 안전 가드: 문제 시 NA로
-    gat_ms = vont_ms_env = got_ms = vofft_ms = oid_ms = np.nan
-    tremor_ratio = np.nan
-
+    # 9) 결과표
     summary = pd.DataFrame({
         "Parameter": [
             "Amplitude Periodicity (AP)",
@@ -533,7 +536,8 @@ except Exception as e:
             "PS_dist (0=normal)",
             "Voice Onset Time (VOnT, ms)",
             "Voice Offset Time (VOffT, ms)",
-            "GAT (ms)", "GOT (ms)", "VOnT_env (ms)", "VOffT_env (ms)", "OID = VOffT_env − GOT (ms)",
+            "GAT (ms)", "GOT (ms)", "VOnT_env (ms)", "VOffT_env (ms)",
+            "OID = VOffT_env − GOT (ms)",
             "Tremor Index (4–5 Hz, env)"
         ],
         "Value": [
@@ -542,6 +546,7 @@ except Exception as e:
         ]
     })
 
+    # 10) 시각화용 viz 패킷
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
         E_on=E_on, E_off=E_off,
@@ -552,15 +557,16 @@ except Exception as e:
         AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist,
         VOnT=VOnT, VOffT=VOffT,
-        env_v32=env_v32 if 'env_v32' in locals() else None,
+        # v3.2 신규
+        env_v32=locals().get("env_v32", None),
         GAT_ms=gat_ms, GOT_ms=got_ms,
         VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
         OID_ms=oid_ms, TremorIndex=tremor_ratio,
     )
 
+    # 11) 반환
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
-
     
 
 # -------------------- Overview renderer --------------------
@@ -1125,6 +1131,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
