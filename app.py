@@ -499,33 +499,79 @@ def analyze(df: pd.DataFrame, adv: dict):
 
         VOnT  = (t_steady - t_move) * 1000.0 if (np.isfinite(t_steady) and np.isfinite(t_move)) else np.nan
         VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end) and np.isfinite(t_last)) else np.nan
+   
+# ===== v3.2: envelope 기반 GAT/GOT + OID + Tremor 추가 =====
+# total_s: 이미 smoothing된 total 파형 (위에서 만든 것)
+# fps    : 위에서 계산한 프레임레이트(Hz)
 
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "AS (legacy, median p2p)",
-            "AS_range (robust)",
-            "AS_area (energy)",
-            "AS_corr (shape)",
-            "PS_sim (1=good)",
-            "PS_dist (0=normal)",
-            "Voice Onset Time (VOnT, ms)",
-            "Voice Offset Time (VOffT, ms)",
-        ],
-        "Value": [AP, TP, AS_legacy, AS_range, AS_area, AS_corr, PS_sim, PS_dist, VOnT, VOffT]
-    })
-
-    viz = dict(
-        t=t, total_s=total_s, left_s=left_s, right_s=right_s,
-        E_on=E_on, E_off=E_off,
-        thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
-        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
-        cycles=cycles, AP=AP, TP=TP, AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
-        PS_sim=PS_sim, PS_dist=PS_dist, VOnT=VOnT, VOffT=VOffT
+try:
+    env_v32 = compute_envelope(total_s, fps)  # Hilbert + Savitzky-Golay
+    gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
+        env_v32, fps,
+        k=1.0,           # baseline + k·σ
+        min_run_ms=12,   # 연속성 요건
+        win_cycles=4,    # 주기 안정성 윈도
+        cv_max=0.12      # 변동계수 허용치
     )
-    extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
-    return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
+    oid_ms = compute_oid(got_ms, vofft_ms)
+    tremor_ratio = tremor_index_psd(env_v32, fps, band=(4.0, 5.0), total=(1.0, 20.0))
+
+except Exception as e:
+    # 안전 가드: 문제 시 NA로
+    gat_ms = vont_ms_env = got_ms = vofft_ms = oid_ms = np.nan
+    tremor_ratio = np.nan
+
+summary = pd.DataFrame({
+    "Parameter": [
+        "Amplitude Periodicity (AP)",
+        "Time Periodicity (TP)",
+        "AS (legacy, median p2p)",
+        "AS_range (robust)",
+        "AS_area (energy)",
+        "AS_corr (shape)",
+        "PS_sim (1=good)",
+        "PS_dist (0=normal)",
+        "Voice Onset Time (VOnT, ms)",      # 기존 energy 기반
+        "Voice Offset Time (VOffT, ms)",    # 기존 energy 기반
+        "GAT (ms)",                         # ★ 신규
+        "GOT (ms)",                         # ★ 신규
+        "VOnT_env (ms)",                    # ★ 신규: envelope 기반
+        "VOffT_env (ms)",                   # ★ 신규: envelope 기반
+        "OID = VOffT_env − GOT (ms)",       # ★ 신규
+        "Tremor Index (4–5 Hz, env)"        # ★ 신규
+    ],
+    "Value": [
+        AP, TP, AS_legacy, AS_range, AS_area, AS_corr, PS_sim, PS_dist,
+        VOnT, VOffT,
+        gat_ms, got_ms, vont_ms_env, vofft_ms, oid_ms, tremor_ratio
+    ]
+})
+
+viz = dict(
+    t=t, total_s=total_s, left_s=left_s, right_s=right_s,
+    E_on=E_on, E_off=E_off,
+    thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
+    i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
+    cycles=cycles,
+    AP=AP, TP=TP,
+    AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
+    PS_sim=PS_sim, PS_dist=PS_dist,
+    VOnT=VOnT, VOffT=VOffT,
+
+    # ===== v3.2 신규 시각화 항목 =====
+    env_v32=env_v32 if 'env_v32' in locals() else None,
+    GAT_ms=gat_ms,
+    GOT_ms=got_ms,
+    VOnT_env_ms=vont_ms_env,
+    VOffT_env_ms=vofft_ms,
+    OID_ms=oid_ms,
+    TremorIndex=tremor_ratio,
+)
+
+extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
+
+return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
+
 
 # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT","Auto_On_ms","Auto_Off_ms","Auto_Dur_ms"]
@@ -1089,6 +1135,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
