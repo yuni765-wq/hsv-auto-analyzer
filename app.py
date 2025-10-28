@@ -508,84 +508,75 @@ def analyze(df: pd.DataFrame, adv: dict):
         VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end)    and np.isfinite(t_last)) else np.nan
 
     # 8) v3.2 envelope 기반 GAT/GOT + OID + Tremor
-    err_msgs = []  # 추가: 에러 메시지 수집
+    err_msgs = []
 
-    # compute_envelope
+    # 8-1) envelope
     try:
         env_v32 = compute_envelope(total_s, fps)
-        env_v32 = np.nan_to_num(env_v32, nan=0.0)  # 안전 처리
+        env_v32 = np.nan_to_num(env_v32, nan=0.0)
     except Exception as e:
         env_v32 = None
         err_msgs.append(f"[env] {type(e).__name__}: {e}")
 
-    # detect_gat_vont_got_vofft
+    # 8-2) GAT/GOT/VOnT_env/VOffT_env
     try:
         if env_v32 is not None:
             gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
-                env_v32, fps,
-                k=1.0,
-                min_run_ms=12,
-                win_cycles=4,
-                cv_max=0.12
+                env_v32, fps, k=1.0, min_run_ms=12, win_cycles=4, cv_max=0.12
             )
         else:
-            raise RuntimeError("env_v32 is None")
+            gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
     except Exception as e:
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
 
-    # compute_oid
+    # 8-3) OID
     try:
         oid_ms = compute_oid(got_ms, vofft_ms)
     except Exception as e:
         oid_ms = np.nan
         err_msgs.append(f"[oid] {type(e).__name__}: {e}")
 
-
-# ---- tremor_index_psd (안정화 버전) ----
-try:
-    if env_v32 is not None:
-        from scipy.signal import welch
-        sig = np.nan_to_num(np.asarray(env_v32, float), nan=0.0)
-        L = int(sig.size)
-
-        if L < 64:
-            tremor_ratio = np.nan
-            err_msgs.append("[tremor] short signal (<64 samples)")
-        else:
+    # 8-4) Tremor Index (Welch)
+    try:
+        if env_v32 is not None:
             import math
-            # nperseg: 길이와 fps를 고려해 2^k에 가깝게, 최소 64, 최댓값은 L
-            n2 = 2 ** int(math.floor(math.log2(max(32, fps * 0.5))))
-            nperseg = int(max(64, min(L, n2)))
-            # noverlap은 nperseg-1 이하여야 함
-            noverlap = int(max(0, min(nperseg - 1, nperseg // 2)))
+            from scipy.signal import welch
 
-            f, Pxx = welch(
-                sig, fs=fps, nperseg=nperseg, noverlap=noverlap,
-                detrend="constant", scaling="density"
-            )
+            sig = np.asarray(env_v32, float)
+            L = sig.size
 
-            # PSD 기반 Tremor Index (4–5Hz / 1–20Hz)
-            tgt = (f >= 4.0) & (f <= 5.0)
-            tot = (f >= 1.0) & (f <= 20.0)
-            tremor_ratio = (
-                np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
-                if np.any(tgt) and np.any(tot) else np.nan
-            )
-    else:
+            if L < 64:
+                tremor_ratio = np.nan
+                err_msgs.append("[tremor] short signal (< 64 samples)")
+            else:
+                # 윈도/FFT 파라미터 자동 설정(안전 가드 포함)
+                win = int(max(64, min(L, 2 ** int(math.floor(math.log2(max(32, fps * 0.5)))))))
+                nperseg = max(32, min(win, L))
+                noverlap = max(0, min(nperseg - 1, nperseg // 2))
+
+                f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
+
+                tgt = ((f >= 4.0) & (f <= 5.0))
+                tot = ((f >= 1.0) & (f <= 20.0))
+
+                if np.any(tgt) and np.any(tot):
+                    tremor_ratio = (
+                        np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
+                    )
+                else:
+                    tremor_ratio = np.nan
+        else:
+            tremor_ratio = np.nan
+    except Exception as e:
         tremor_ratio = np.nan
+        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
-except Exception as e:
-    tremor_ratio = np.nan
-    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
-
-    
-
-    # 디버그 메시지 출력(있을 때만)
-    if len(err_msgs):
+    # 디버그 노트(있을 때만)
+    if err_msgs:
         st.info("v3.2 calc notes:\n" + "\n".join(err_msgs))
 
-    # 9) 결과표
+    # 9) 결과표 구성
     summary = pd.DataFrame({
         "Parameter": [
             "Amplitude Periodicity (AP)",
@@ -613,11 +604,11 @@ except Exception as e:
         ]
     })
 
+    # 10) viz 패킷
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
         E_on=E_on, E_off=E_off,
-        thr_on=Th_on, thr_off=Th_off,
-        Tlow_on=Tl_on, Tlow_off=Tl_off,
+        thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
         i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
         cycles=cycles,
         AP=AP, TP=TP, AS_legacy=AS_legacy,
@@ -630,6 +621,7 @@ except Exception as e:
         OID_ms=oid_ms, TremorIndex=tremor_ratio,
     )
 
+    # 11) 반환 (★ 이 줄 포함 아래 3줄이 반드시 analyze 내부 4칸 들여쓰기여야 함)
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
     
@@ -1200,6 +1192,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
