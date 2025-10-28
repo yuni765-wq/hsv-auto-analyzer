@@ -33,7 +33,7 @@ from metrics import (
 REQUIRED_FUNCS = [
     compute_envelope,
     detect_gat_vont_got_vofft,
-    compute_oid,
+     compute_oid_metrics,
     tremor_index_psd,
 ]
 # ---- global numeric guard (v3.2 공용) ----
@@ -1317,6 +1317,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
