@@ -620,17 +620,19 @@ except Exception as e:
         thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
         i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
         cycles=cycles,
-        AP=AP, TP=TP, AS_legacy=AS_legacy,
-        AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
+        AP=AP, TP=TP,
+        AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist,
         VOnT=VOnT, VOffT=VOffT,
-        env_v32=env_v32,
+
+        # v3.2 신규
+        env_v32=locals().get("env_v32", None),
         GAT_ms=gat_ms, GOT_ms=got_ms,
         VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
-        OID_ms=oid_ms, TremorIndex=tremor_ratio,
+        OID_ms=oid_ms,
+        TremorIndex=tremor_ratio,
     )
 
-    # 11) 반환 (★ 이 줄 포함 아래 3줄이 반드시 analyze 내부 4칸 들여쓰기여야 함)
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
     
@@ -1201,6 +1203,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
