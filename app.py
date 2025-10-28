@@ -633,6 +633,32 @@ def analyze(df: pd.DataFrame, adv: dict):
         ]
     })
 
+    # 표시 포맷: NaN/None은 "N/A"로 보이게
+    def _fmt(v):
+        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
+    summary["Value"] = [_fmt(v) for v in summary["Value"]]
+
+    # v3.2 반환 패킷
+    viz = dict(
+        t=t, total_s=total_s, left_s=left_s, right_s=right_s,
+        E_on=E_on, E_off=E_off,
+        thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
+        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
+        cycles=cycles,
+        AP=AP, TP=TP,
+        AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
+        PS_sim=PS_sim, PS_dist=PS_dist,
+        VOnT=VOnT, VOffT=VOffT,
+        env_v32=locals().get("env_v32", None),
+        GAT_ms=gat_ms, GOT_ms=got_ms,
+        VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
+        OID_ms=oid_ms, TremorIndex=tremor_ratio,
+    )
+    extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
+
+    # analyze() 함수 내부에서 종료
+    return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
+
     # =====================================================
     # v3.2 반환 패킷 구성 (✅ analyze 함수 내부, 동일 인덴트)
     # =====================================================
@@ -1271,6 +1297,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
