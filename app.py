@@ -534,21 +534,18 @@ def analyze(df: pd.DataFrame, adv: dict):
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
             # 8-2b) 유효성 검사 + 폴백 적용
-    if not _is_num(gat_ms):
-        if _is_num(vont_ms_env):
-            gat_ms = float(vont_ms_env)
-        elif _is_num(VOnT):
-            gat_ms = float(VOnT)
-        else:
-            gat_ms = np.nan
+# ✅ GAT는 대체 불가. 계산 실패 시 NaN 유지
+if not _is_num(gat_ms):
+    gat_ms = np.nan
 
-    if not _is_num(got_ms):
-        if _is_num(vofft_ms):
-            got_ms = float(vofft_ms)
-        elif _is_num(VOffT):
-            got_ms = float(VOffT)
-        else:
-            got_ms = np.nan
+# ✅ GOT 폴백 적용
+if not _is_num(got_ms):
+    if _is_num(vofft_ms) and _is_num(vont_ms_env):
+        got_ms = float(vofft_ms) - float(vont_ms_env)
+    elif _is_num(VOffT) and _is_num(VOnT):
+        got_ms = float(VOffT) - float(VOnT)
+    else:
+        got_ms = np.nan
 
     # ---- GAT fallback (when None/NaN) ------------------------------
     # 빈칸 방지: VOnT_env → VOnT 순으로 보수적 대체
@@ -614,58 +611,89 @@ def compute_oid(got_ms, vofft_ms):
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
     # 9) 결과표 구성 ------------------------------------------------------------
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "AS (legacy, median p2p)",
-            "AS_range (robust)",
-            "AS_area (energy)",
-            "AS_corr (shape)",
-            "PS_sim (1=good)",
-            "PS_dist (0=normal)",
-            "Voice Onset Time (VOnT, ms)",
-            "Voice Offset Time (VOffT, ms)",
-            "GAT (ms)", "GOT (ms)",
-            "VOnT_env (ms)", "VOffT_env (ms)",
-            "OID = VOffT_env − GOT (ms)",
-            "Tremor Index (4–5 Hz, env)"
-        ],
-        "Value": [
-            AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
-            PS_sim, PS_dist,
-            VOnT, VOffT,
-            gat_ms, got_ms,
-            vont_ms_env, vofft_ms,
-            oid_ms, tremor_ratio
-        ]
-    })
-
-    # 표시 포맷: NaN/None → "N/A" (표시 전용)
-    def _fmt(v):
-        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
-    summary["Value"] = [_fmt(v) for v in summary["Value"]]
+    try:
+        summary = pd.DataFrame({
+            "Parameter": [
+                "Amplitude Periodicity (AP)",
+                "Time Periodicity (TP)",
+                "AS (legacy, median p2p)",
+                "AS_range (robust)",
+                "AS_area (energy)",
+                "AS_corr (shape)",
+                "PS_sim (1=good)",
+                "PS_dist (0=normal)",
+                "Voice Onset Time (VOnT, ms)",
+                "Voice Offset Time (VOffT, ms)",
+                "GAT (ms)", "GOT (ms)",
+                "VOnT_env (ms)", "VOffT_env (ms)",
+                "OID = VOffT_env − GOT (ms)",
+                "Tremor Index (4–5 Hz, env)"
+            ],
+            "Value": [
+                AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
+                PS_sim, PS_dist,
+                VOnT, VOffT,
+                gat_ms, got_ms,
+                vont_ms_env, vofft_ms,
+                oid_ms, tremor_ratio
+            ]
+        })
+        # 표시 포맷: NaN/None → "N/A"
+        def _fmt(v):
+            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
+        summary["Value"] = [_fmt(v) for v in summary["Value"]]
+    except Exception as e:
+        # 요약표 생성에서 예외가 나도 빈 표 반환
+        summary = pd.DataFrame({"Parameter": [], "Value": []})
+        if 'err_msgs' in locals():
+            err_msgs.append(f"[summary] {type(e).__name__}: {e}")
 
     # 10) viz 패킷 -------------------------------------------------------------
-    viz = dict(
-        t=t, total_s=total_s, left_s=left_s, right_s=right_s,
-        E_on=E_on, E_off=E_off,
-        thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
-        i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
-        cycles=cycles,
-        AP=AP, TP=TP,
-        AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
-        PS_sim=PS_sim, PS_dist=PS_dist,
-        VOnT=VOnT, VOffT=VOffT,
-        # v3.2
-        env_v32=locals().get("env_v32", None),
-        GAT_ms=gat_ms, GOT_ms=got_ms,
-        VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
-        OID_ms=oid_ms, TremorIndex=tremor_ratio,
-    )
-    extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
+    try:
+        viz = dict(
+            t=t if 't' in locals() else None,
+            total_s=total_s if 'total_s' in locals() else None,
+            left_s=left_s if 'left_s' in locals() else None,
+            right_s=right_s if 'right_s' in locals() else None,
+            E_on=E_on if 'E_on' in locals() else None,
+            E_off=E_off if 'E_off' in locals() else None,
+            thr_on=Th_on if 'Th_on' in locals() else None,
+            thr_off=Th_off if 'Th_off' in locals() else None,
+            Tlow_on=Tl_on if 'Tl_on' in locals() else None,
+            Tlow_off=Tl_off if 'Tl_off' in locals() else None,
+            i_move=i_move if 'i_move' in locals() else None,
+            i_steady=i_steady if 'i_steady' in locals() else None,
+            i_last=i_last if 'i_last' in locals() else None,
+            i_end=i_end if 'i_end' in locals() else None,
+            cycles=cycles if 'cycles' in locals() else [],
+            AP=AP if 'AP' in locals() else np.nan,
+            TP=TP if 'TP' in locals() else np.nan,
+            AS_legacy=AS_legacy if 'AS_legacy' in locals() else np.nan,
+            AS_range=AS_range if 'AS_range' in locals() else np.nan,
+            AS_area=AS_area if 'AS_area' in locals() else np.nan,
+            AS_corr=AS_corr if 'AS_corr' in locals() else np.nan,
+            PS_sim=PS_sim if 'PS_sim' in locals() else np.nan,
+            PS_dist=PS_dist if 'PS_dist' in locals() else np.nan,
+            VOnT=VOnT if 'VOnT' in locals() else np.nan,
+            VOffT=VOffT if 'VOffT' in locals() else np.nan,
+            # v3.2
+            env_v32=locals().get("env_v32", None),
+            GAT_ms=gat_ms if 'gat_ms' in locals() else np.nan,
+            GOT_ms=got_ms if 'got_ms' in locals() else np.nan,
+            VOnT_env_ms=vont_ms_env if 'vont_ms_env' in locals() else np.nan,
+            VOffT_env_ms=vofft_ms if 'vofft_ms' in locals() else np.nan,
+            OID_ms=oid_ms if 'oid_ms' in locals() else np.nan,
+            TremorIndex=tremor_ratio if 'tremor_ratio' in locals() else np.nan,
+        )
+        fps_safe = fps if 'fps' in locals() else np.nan
+        n_cycles_safe = len(cycles) if 'cycles' in locals() else 0
+        extras = dict(fps=fps_safe, n_cycles=n_cycles_safe, viz=viz)
+    except Exception as e:
+        extras = dict(fps=np.nan, n_cycles=0, viz={})
+        if 'err_msgs' in locals():
+            err_msgs.append(f"[viz] {type(e).__name__}: {e}")
 
-    # 11) 함수 반환 -------------------------------------------------------------
+    # 11) 반환(항상 실행) -------------------------------------------------------
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
     # =====================================================
     # v3.2 반환 패킷 구성 (✅ analyze 함수 내부, 동일 인덴트)
@@ -1308,6 +1336,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
