@@ -578,21 +578,18 @@ def compute_oid(got_ms, vofft_ms):
 
     # 8-3) OID
     try:
-        oid_ms = compute_oid(got_ms, vofft_ms)
+        oid_ms = compute_oid(got_ms, vofft_ms)   # compute_oid는 _is_num 사용 버전
     except Exception as e:
         oid_ms = np.nan
         err_msgs.append(f"[oid] {type(e).__name__}: {e}")
 
-    # --------------------------------------------
-    # tremor_index_psd (안정성 버전)
-    # --------------------------------------------
+    # 8-4) TremorIndex (안정성 버전)
     try:
         if env_v32 is not None:
             from scipy.signal import welch
             sig = np.asarray(env_v32, float)
             sig = np.nan_to_num(sig, nan=0.0)
             L = int(sig.size)
-
             if L < 64:
                 tremor_ratio = np.nan
                 err_msgs.append("[tremor] short signal (<64 samples)")
@@ -600,34 +597,23 @@ def compute_oid(got_ms, vofft_ms):
                 import math
                 target_len = max(32, int(fps * 0.35))
                 win_pow    = int(math.log2(max(32, min(L, target_len))))
-                nperseg    = 2 ** win_pow
-                nperseg    = max(32, min(nperseg, L))
-
+                nperseg    = max(32, min(2 ** win_pow, L))
                 noverlap   = min(nperseg // 2, nperseg - 1, max(0, L // 4))
                 if noverlap >= nperseg:
                     noverlap = max(0, nperseg // 2 - 1)
-
                 f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
-
                 tgt = ((f >= 4.0) & (f <= 5.0))
                 tot = ((f >= 1.0) & (f <= 20.0))
-
                 num = np.trapz(Pxx[tgt], f[tgt]) if np.any(tgt) else 0.0
                 den = np.trapz(Pxx[tot], f[tot]) if np.any(tot) else 0.0
-
                 tremor_ratio = (num / den) if (den > 0 and np.isfinite(num)) else np.nan
         else:
             tremor_ratio = np.nan
-
     except Exception as e:
         tremor_ratio = np.nan
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
-    # 디버그 노트
-    if err_msgs:
-        st.info("v3.2 calc notes:\n" + "\n".join(err_msgs))
-
-    # 9) 결과표 구성
+    # 9) 결과표 구성 ------------------------------------------------------------
     summary = pd.DataFrame({
         "Parameter": [
             "Amplitude Periodicity (AP)",
@@ -655,12 +641,12 @@ def compute_oid(got_ms, vofft_ms):
         ]
     })
 
-    # 표시 포맷: NaN/None은 "N/A"로 보이게
+    # 표시 포맷: NaN/None → "N/A" (표시 전용)
     def _fmt(v):
         return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
     summary["Value"] = [_fmt(v) for v in summary["Value"]]
 
-    # v3.2 반환 패킷
+    # 10) viz 패킷 -------------------------------------------------------------
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
         E_on=E_on, E_off=E_off,
@@ -671,6 +657,7 @@ def compute_oid(got_ms, vofft_ms):
         AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist,
         VOnT=VOnT, VOffT=VOffT,
+        # v3.2
         env_v32=locals().get("env_v32", None),
         GAT_ms=gat_ms, GOT_ms=got_ms,
         VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
@@ -678,9 +665,8 @@ def compute_oid(got_ms, vofft_ms):
     )
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
 
-    # analyze() 함수 내부에서 종료
+    # 11) 함수 반환 -------------------------------------------------------------
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
-
     # =====================================================
     # v3.2 반환 패킷 구성 (✅ analyze 함수 내부, 동일 인덴트)
     # =====================================================
@@ -1322,6 +1308,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
