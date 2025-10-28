@@ -541,15 +541,41 @@ def analyze(df: pd.DataFrame, adv: dict):
         oid_ms = np.nan
         err_msgs.append(f"[oid] {type(e).__name__}: {e}")
 
-    # tremor_index_psd
-    try:
-        tremor_ratio = (
-            tremor_index_psd(env_v32, fps, band=(4.0, 5.0), total=(1.0, 20.0))
-            if env_v32 is not None else np.nan
-        )
-    except Exception as e:
+
+        # tremor_index_psd (안정화 버전)
+try:
+    if env_v32 is not None:
+        from scipy.signal import welch
+        sig = np.asarray(env_v32, float)
+        L = sig.size
+
+        if L < 64:
+            # 신호가 너무 짧으면 계산 자체를 하지 않음
+            tremor_ratio = np.nan
+            err_msgs.append("[tremor] short signal (<64 samples)")
+        else:
+            # 신호 길이에 맞춘 안정적 파라미터 자동 설정
+            import math
+            win = int(max(64, min(L, 2 ** math.floor(math.log2(max(32, fps * 0.5))))))
+            nperseg = max(32, min(win, L))
+            noverlap = max(0, min(nperseg - 1, nperseg // 2))
+
+            f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
+
+            # PSD 기반 Tremor Index 계산 (4~5Hz / 1~20Hz 비율)
+            tgt = ((f >= 4.0) & (f <= 5.0))
+            tot = ((f >= 1.0) & (f <= 20.0))
+            tremor_ratio = (
+                np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
+                if np.any(tgt) and np.any(tot) else np.nan
+            )
+    else:
         tremor_ratio = np.nan
-        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+
+except Exception as e:
+    tremor_ratio = np.nan
+    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+
 
     # 디버그 메시지 출력(있을 때만)
     if len(err_msgs):
@@ -1169,6 +1195,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
