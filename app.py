@@ -510,6 +510,10 @@ def analyze(df: pd.DataFrame, adv: dict):
     # 8) v3.2 envelope 기반 GAT/GOT + OID + Tremor
     err_msgs = []
 
+        # 안전한 숫자 판별 헬퍼
+    def _is_num(x):
+        return isinstance(x, (int, float, np.integer, np.floating)) and np.isfinite(x)
+
     # 8-1) envelope
     try:
         env_v32 = compute_envelope(total_s, fps)
@@ -529,10 +533,26 @@ def analyze(df: pd.DataFrame, adv: dict):
     except Exception as e:
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
+            # 8-2b) 유효성 검사 + 폴백 적용
+    if not _is_num(gat_ms):
+        if _is_num(vont_ms_env):
+            gat_ms = float(vont_ms_env)
+        elif _is_num(VOnT):
+            gat_ms = float(VOnT)
+        else:
+            gat_ms = np.nan
+
+    if not _is_num(got_ms):
+        if _is_num(vofft_ms):
+            got_ms = float(vofft_ms)
+        elif _is_num(VOffT):
+            got_ms = float(VOffT)
+        else:
+            got_ms = np.nan
 
     # ---- GAT fallback (when None/NaN) ------------------------------
     # 빈칸 방지: VOnT_env → VOnT 순으로 보수적 대체
-    if not np.isfinite(gat_ms):
+    if not _is_num(gat_ms):
         if np.isfinite(vont_ms_env):
             gat_ms = float(vont_ms_env)
             err_msgs.append("[GAT] fallback → VOnT_env")
@@ -544,15 +564,17 @@ def analyze(df: pd.DataFrame, adv: dict):
             err_msgs.append("[GAT] unavailable")
     # ----------------------------------------------------------------
 
-    # ===============================================
-    # compute_oid : OID = VOffT_env − GOT (ms)
-    # ===============================================
-    def compute_oid(got_ms, vofft_ms):
-        if got_ms is None or vofft_ms is None:
-            return np.nan
-        if not np.isfinite(got_ms) or not np.isfinite(vofft_ms):
-            return np.nan
-        return float(vofft_ms - got_ms)
+
+# ===============================================
+# compute_oid : OID = VOffT_env − GOT (ms)
+# ===============================================
+def compute_oid(got_ms, vofft_ms):
+    if not _is_num(got_ms) or not _is_num(vofft_ms):
+        return np.nan
+    # 필요 시 한 번 더 float 캐스팅
+    got = float(got_ms)
+    off = float(vofft_ms)
+    return off - got
 
     # 8-3) OID
     try:
@@ -1300,6 +1322,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
