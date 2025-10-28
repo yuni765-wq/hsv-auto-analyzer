@@ -360,17 +360,16 @@ def analyze(df: pd.DataFrame, adv: dict):
     cols = _norm_cols(df.columns.tolist())
     df = df.copy()
     df.columns = cols
-
-    import numpy as np
-    def _is_num(x):
-        return isinstance(x, (int, float)) and np.isfinite(x)
-        
     def pick(key):
         for c in cols:
             if key in c:
                 return c
         return None
-
+        
+    import numpy as np
+    def _is_num(x):
+        return isinstance(x, (int, float)) and np.isfinite(x)
+        
     time_col   = pick("time")
     left_col   = pick("left")
     right_col  = pick("right")
@@ -1340,6 +1339,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
