@@ -883,6 +883,47 @@ st.markdown(
 )
 
 # ---- Visualization ----
+def render_v32(viz: dict):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    t = viz.get("t")
+    env = viz.get("env_v32")
+    if env is None or t is None:
+        st.info("v3.2 envelope가 없어 마커를 표시하지 않습니다.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 3))
+    ax.plot(t, env, label="Envelope (v3.2)")
+
+    def ms_to_s(ms):
+        return (ms / 1000.0) if (ms is not None and np.isfinite(ms)) else None
+
+    v_vont_env  = ms_to_s(viz.get("VOnT_env_ms"))
+    v_vofft_env = ms_to_s(viz.get("VOffT_env_ms"))
+    t0 = float(t[0]) if hasattr(t, "__len__") and len(t) else 0.0
+
+    if v_vont_env is not None:
+        ax.axvline(t0 + v_vont_env, linestyle="--", label="VOnT_env", alpha=0.8)
+    if v_vofft_env is not None:
+        ax.axvline(t0 + v_vofft_env, linestyle="--", label="VOffT_env", alpha=0.8)
+
+    oid_ms = viz.get("OID_ms")
+    if oid_ms is not None and np.isfinite(oid_ms):
+        ax.text(0.01, 0.95, f"OID = {oid_ms:.2f} ms",
+                transform=ax.transAxes, ha="left", va="top",
+                bbox=dict(boxstyle="round", alpha=0.2))
+
+    tri = viz.get("TremorIndex")
+    if tri is not None and np.isfinite(tri):
+        ax.text(0.99, 0.95, f"TremorIndex(4–5 Hz) = {tri:.4f}",
+                transform=ax.transAxes, ha="right", va="top",
+                bbox=dict(boxstyle="round", alpha=0.2))
+
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Amplitude (a.u.)")
+    ax.legend(loc="upper right")
+    st.pyplot(fig)
+
 def make_total_plot(t, total_s, cycles, i_move, i_steady, i_last, i_end, Auto_On_ms, Auto_Off_ms, zoom="전체"):
     fig = go.Figure()
     if t is None or total_s is None:
@@ -1018,6 +1059,11 @@ if "Visualization" in tab_names and uploaded is not None:
                                 Auto_On_ms, Auto_Off_ms, zoom_preset),
                 use_container_width=True
             )
+            
+    # ✅ v3.2 Envelope + OID + Tremor 표시
+    viz = extras.get("viz", {}) if isinstance(extras, dict) else {}
+    if viz.get("env_v32") is not None:
+        render_v32(viz)
 
             # B) Left vs Right
             st.markdown("#### B) Left vs Right")
@@ -1203,6 +1249,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
