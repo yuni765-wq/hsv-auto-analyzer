@@ -27,7 +27,7 @@ from insight_v32 import (
 from metrics import (
     compute_envelope,
     detect_gat_vont_got_vofft,
-    compute_oid,
+    compute_oid as compute_oid_metrics,  # ← alias
     tremor_index_psd,
 )
 REQUIRED_FUNCS = [
@@ -44,7 +44,11 @@ def is_num(x):
         return np.isfinite(float(x))
     except Exception:
         return False
-
+# ---- safe OID wrapper (v3.2) ----
+def compute_oid_safe(got_ms, vofft_ms):
+    if not is_num(got_ms) or not is_num(vofft_ms):
+        return np.nan
+    return float(vofft_ms) - float(got_ms)
 assert all(callable(f) for f in REQUIRED_FUNCS), "metrics functions not loaded"
 
 # -------------------- Global fixed settings (N–D′) --------------------
@@ -1348,6 +1352,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
