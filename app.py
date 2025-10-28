@@ -361,6 +361,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     df = df.copy()
     df.columns = cols
 
+    import numpy as np
     def _is_num(x):
         return isinstance(x, (int, float)) and np.isfinite(x)
         
@@ -1339,6 +1340,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
