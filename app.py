@@ -543,11 +543,11 @@ def analyze(df: pd.DataFrame, adv: dict):
 
 
         # tremor_index_psd (안정화 버전)
-try:
-    if env_v32 is not None:
-        from scipy.signal import welch
-        sig = np.asarray(env_v32, float)
-        L = sig.size
+    try:
+        if env_v32 is not None:
+            from scipy.signal import welch
+            sig = np.asarray(env_v32, float)
+            L = sig.size
 
         if L < 64:
             # 신호가 너무 짧으면 계산 자체를 하지 않음
@@ -569,13 +569,13 @@ try:
                 np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
                 if np.any(tgt) and np.any(tot) else np.nan
             )
-    else:
+        else:
+            tremor_ratio = np.nan
+
+    except Exception as e:
         tremor_ratio = np.nan
-
-except Exception as e:
-    tremor_ratio = np.nan
-    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
-
+        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+    
 
     # 디버그 메시지 출력(있을 때만)
     if len(err_msgs):
@@ -1195,6 +1195,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
