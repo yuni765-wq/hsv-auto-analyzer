@@ -1042,6 +1042,8 @@ def make_energy_plot2(mode, t, E_on, thr_on, Tlow_on, E_off, thr_off, Tlow_off, 
                       legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
     return fig
 
+
+# ---- Visualization 탭 ----
 if "Visualization" in tab_names and uploaded is not None:
     with tabs[tab_names.index("Visualization")]:
         st.markdown("#### Visualization")
@@ -1051,6 +1053,9 @@ if "Visualization" in tab_names and uploaded is not None:
         zoom_preset = c2.selectbox("줌 프리셋", ["전체", "0–0.2s", "0–0.5s"], index=0)
         energy_mode = c3.radio("에너지 뷰", ["Onset", "Offset"], horizontal=True, index=0)
 
+        # v3.2 viz 패킷 (공용)
+        viz = extras.get("viz", {}) if isinstance(extras, dict) else {}
+
         # A) Total
         if view == "전체":
             st.markdown("#### A) Total")
@@ -1059,11 +1064,10 @@ if "Visualization" in tab_names and uploaded is not None:
                                 Auto_On_ms, Auto_Off_ms, zoom_preset),
                 use_container_width=True
             )
-            
-    # ✅ v3.2 Envelope + OID + Tremor 표시
-    viz = extras.get("viz", {}) if isinstance(extras, dict) else {}
-    if viz.get("env_v32") is not None:
-        render_v32(viz)
+
+            # ✅ v3.2 Envelope + OID + Tremor 표시 (Total 뷰 아래에 겹쳐 보여주기)
+            if viz.get("env_v32") is not None:
+                render_v32(viz)
 
             # B) Left vs Right
             st.markdown("#### B) Left vs Right")
@@ -1105,7 +1109,6 @@ if "Visualization" in tab_names and uploaded is not None:
                                   i_move, i_end, zoom_preset),
                 use_container_width=True
             )
-
 
 # ---- Stats ----
 if "stats" in tab_names and uploaded is not None:
@@ -1249,6 +1252,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
