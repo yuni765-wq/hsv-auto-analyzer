@@ -542,39 +542,43 @@ def analyze(df: pd.DataFrame, adv: dict):
         err_msgs.append(f"[oid] {type(e).__name__}: {e}")
 
 
-        # tremor_index_psd (안정화 버전)
-    try:
-        if env_v32 is not None:
-            from scipy.signal import welch
-            sig = np.asarray(env_v32, float)
-            L = sig.size
+# ---- tremor_index_psd (안정화 버전) ----
+try:
+    if env_v32 is not None:
+        from scipy.signal import welch
+        sig = np.nan_to_num(np.asarray(env_v32, float), nan=0.0)
+        L = int(sig.size)
 
         if L < 64:
-            # 신호가 너무 짧으면 계산 자체를 하지 않음
             tremor_ratio = np.nan
             err_msgs.append("[tremor] short signal (<64 samples)")
         else:
-            # 신호 길이에 맞춘 안정적 파라미터 자동 설정
             import math
-            win = int(max(64, min(L, 2 ** math.floor(math.log2(max(32, fps * 0.5))))))
-            nperseg = max(32, min(win, L))
-            noverlap = max(0, min(nperseg - 1, nperseg // 2))
+            # nperseg: 길이와 fps를 고려해 2^k에 가깝게, 최소 64, 최댓값은 L
+            n2 = 2 ** int(math.floor(math.log2(max(32, fps * 0.5))))
+            nperseg = int(max(64, min(L, n2)))
+            # noverlap은 nperseg-1 이하여야 함
+            noverlap = int(max(0, min(nperseg - 1, nperseg // 2)))
 
-            f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
+            f, Pxx = welch(
+                sig, fs=fps, nperseg=nperseg, noverlap=noverlap,
+                detrend="constant", scaling="density"
+            )
 
-            # PSD 기반 Tremor Index 계산 (4~5Hz / 1~20Hz 비율)
-            tgt = ((f >= 4.0) & (f <= 5.0))
-            tot = ((f >= 1.0) & (f <= 20.0))
+            # PSD 기반 Tremor Index (4–5Hz / 1–20Hz)
+            tgt = (f >= 4.0) & (f <= 5.0)
+            tot = (f >= 1.0) & (f <= 20.0)
             tremor_ratio = (
                 np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
                 if np.any(tgt) and np.any(tot) else np.nan
             )
-        else:
-            tremor_ratio = np.nan
-
-    except Exception as e:
+    else:
         tremor_ratio = np.nan
-        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+
+except Exception as e:
+    tremor_ratio = np.nan
+    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+
     
 
     # 디버그 메시지 출력(있을 때만)
@@ -627,7 +631,6 @@ def analyze(df: pd.DataFrame, adv: dict):
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
 
     
-
 # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = [
     "AP", "TP", "PS_dist", "AS_corr", "AS_range", "AS_area",
@@ -1195,6 +1198,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
