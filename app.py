@@ -549,34 +549,68 @@ def analyze(df: pd.DataFrame, adv: dict):
     except Exception as e:
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
-            # 8-2b) 유효성 검사 + 폴백 적용
-# ✅ GAT는 대체 불가. 계산 실패 시 NaN 유지
-if not is_num(gat_ms):
-    gat_ms = np.nan
 
-# ✅ GOT 폴백 적용
-if not is_num(got_ms):
-    if is_num(vofft_ms) and is_num(vont_ms_env):
-        got_ms = float(vofft_ms) - float(vont_ms_env)
-    elif is_num(VOffT) and is_num(VOnT):
-        got_ms = float(VOffT) - float(VOnT)
-    else:
-        got_ms = np.nan
-
-    # ---- GAT fallback (when None/NaN) ------------------------------
-    # 빈칸 방지: VOnT_env → VOnT 순으로 보수적 대체
+    # 8-2b) 유효성 검사 + 폴백 적용
+    # ✅ GAT는 계산 실패 시 NaN 유지(단, 표시 공백 방지를 위해 보수적 폴백 허용)
     if not is_num(gat_ms):
-        if np.isfinite(vont_ms_env):
+        gat_ms = np.nan
+
+    # ✅ GOT 폴백: 우선 env 기반, 없으면 VOnT/VOffT 보조
+    if not is_num(got_ms):
+        if is_num(vofft_ms) and is_num(vont_ms_env):
+            got_ms = float(vofft_ms) - float(vont_ms_env)
+        else:
+            VOnT_safe  = VOnT  if is_num(VOnT)  else np.nan
+            VOffT_safe = VOffT if is_num(VOffT) else np.nan
+            got_ms = (float(VOffT_safe) - float(VOnT_safe)) if (is_num(VOnT_safe) and is_num(VOffT_safe)) else np.nan
+
+    # ✅ GAT 폴백: VOnT_env → VOnT 순
+    if not is_num(gat_ms):
+        if is_num(vont_ms_env):
             gat_ms = float(vont_ms_env)
             err_msgs.append("[GAT] fallback → VOnT_env")
-        elif np.isfinite(VOnT):
+        elif is_num(VOnT):
             gat_ms = float(VOnT)
             err_msgs.append("[GAT] fallback → VOnT")
         else:
             gat_ms = np.nan
             err_msgs.append("[GAT] unavailable")
-    # ----------------------------------------------------------------
 
+    # 8-3) OID
+    try:
+        oid_ms = compute_oid_safe(got_ms, vofft_ms)
+    except Exception as e:
+        oid_ms = np.nan
+        err_msgs.append(f"[oid] {type(e).__name__}: {e}")
+
+    # 8-4) TremorIndex (안정성 버전)
+    try:
+        if env_v32 is not None:
+            from scipy.signal import welch
+            sig = np.asarray(env_v32, float)
+            sig = np.nan_to_num(sig, nan=0.0)
+            L = int(sig.size)
+            if L < 64:
+                tremor_ratio = np.nan
+                err_msgs.append("[tremor] short signal (<64 samples)")
+            else:
+                target_len = max(32, int(fps * 0.35))
+                win_pow    = int(math.log2(max(32, min(L, target_len))))
+                nperseg    = max(32, min(2 ** win_pow, L))
+                noverlap   = min(nperseg // 2, nperseg - 1, max(0, L // 4))
+                if noverlap >= nperseg:
+                    noverlap = max(0, nperseg // 2 - 1)
+                f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
+                tgt = ((f >= 4.0) & (f <= 5.0))
+                tot = ((f >= 1.0) & (f <= 20.0))
+                num = np.trapz(Pxx[tgt], f[tgt]) if np.any(tgt) else 0.0
+                den = np.trapz(Pxx[tot], f[tot]) if np.any(tot) else 0.0
+                tremor_ratio = (num / den) if (den > 0 and np.isfinite(num)) else np.nan
+        else:
+            tremor_ratio = np.nan
+    except Exception as e:
+        tremor_ratio = np.nan
+        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
 # ===============================================
 # compute_oid : OID = VOffT_env − GOT (ms)
@@ -1352,6 +1386,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
