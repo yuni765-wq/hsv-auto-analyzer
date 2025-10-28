@@ -530,6 +530,15 @@ def analyze(df: pd.DataFrame, adv: dict):
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
 
+    # ===============================================
+    # compute_oid : OID = VOffT_env − GOT (ms)
+    # ===============================================
+    def compute_oid(got_ms, vofft_ms):
+        if got_ms is None or vofft_ms is None:
+            return np.nan
+        if not np.isfinite(got_ms) or not np.isfinite(vofft_ms):
+            return np.nan
+        return float(vofft_ms - got_ms)
     # 8-3) OID
     try:
         oid_ms = compute_oid(got_ms, vofft_ms)
@@ -1247,6 +1256,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
