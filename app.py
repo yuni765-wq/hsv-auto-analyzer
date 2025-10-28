@@ -530,6 +530,20 @@ def analyze(df: pd.DataFrame, adv: dict):
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
 
+    # ---- GAT fallback (when None/NaN) ------------------------------
+    # 빈칸 방지: VOnT_env → VOnT 순으로 보수적 대체
+    if not np.isfinite(gat_ms):
+        if np.isfinite(vont_ms_env):
+            gat_ms = float(vont_ms_env)
+            err_msgs.append("[GAT] fallback → VOnT_env")
+        elif np.isfinite(VOnT):
+            gat_ms = float(VOnT)
+            err_msgs.append("[GAT] fallback → VOnT")
+        else:
+            gat_ms = np.nan
+            err_msgs.append("[GAT] unavailable")
+    # ----------------------------------------------------------------
+
     # ===============================================
     # compute_oid : OID = VOffT_env − GOT (ms)
     # ===============================================
@@ -539,6 +553,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         if not np.isfinite(got_ms) or not np.isfinite(vofft_ms):
             return np.nan
         return float(vofft_ms - got_ms)
+
     # 8-3) OID
     try:
         oid_ms = compute_oid(got_ms, vofft_ms)
@@ -1256,6 +1271,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
