@@ -507,21 +507,53 @@ def analyze(df: pd.DataFrame, adv: dict):
         VOnT  = (t_steady - t_move) * 1000.0 if (np.isfinite(t_steady) and np.isfinite(t_move)) else np.nan
         VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end)    and np.isfinite(t_last)) else np.nan
 
-    # 8) v3.2 envelope 기반 GAT/GOT + OID + Tremor
-    try:
-        env_v32 = compute_envelope(total_s, fps)  # Hilbert + Savitzky-Golay
+# 8) v3.2 envelope 기반 GAT/GOT + OID + Tremor
+err_msgs = []  # 추가: 에러 메시지 수집
+
+# compute_envelope
+try:
+    env_v32 = compute_envelope(total_s, fps)
+    env_v32 = np.nan_to_num(env_v32, nan=0.0)  # 안전 처리
+except Exception as e:
+    env_v32 = None
+    err_msgs.append(f"[env] {type(e).__name__}: {e}")
+
+# detect_gat_vont_got_vofft
+try:
+    if env_v32 is not None:
         gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
             env_v32, fps,
-            k=1.0,           # baseline + k·σ
-            min_run_ms=12,   # 연속성 요건
-            win_cycles=4,    # 주기 안정성 윈도
-            cv_max=0.12      # 변동계수 허용치
+            k=1.0,
+            min_run_ms=12,
+            win_cycles=4,
+            cv_max=0.12
         )
-        oid_ms = compute_oid(got_ms, vofft_ms)
-        tremor_ratio = tremor_index_psd(env_v32, fps, band=(4.0, 5.0), total=(1.0, 20.0))
-    except Exception:
-        gat_ms = vont_ms_env = got_ms = vofft_ms = oid_ms = np.nan
-        tremor_ratio = np.nan
+    else:
+        raise RuntimeError("env_v32 is None")
+except Exception as e:
+    gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
+    err_msgs.append(f"[detect] {type(e).__name__}: {e}")
+
+# compute_oid
+try:
+    oid_ms = compute_oid(got_ms, vofft_ms)
+except Exception as e:
+    oid_ms = np.nan
+    err_msgs.append(f"[oid] {type(e).__name__}: {e}")
+
+# tremor_index_psd
+try:
+    tremor_ratio = (
+        tremor_index_psd(env_v32, fps, band=(4.0, 5.0), total=(1.0, 20.0))
+        if env_v32 is not None else np.nan
+    )
+except Exception as e:
+    tremor_ratio = np.nan
+    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+
+# 디버그 메시지 출력
+if len(err_msgs):
+    st.info("v3.2 calc notes:\n" + "\n".join(err_msgs))
 
     # 9) 결과표
     summary = pd.DataFrame({
@@ -1136,6 +1168,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
