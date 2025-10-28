@@ -570,7 +570,12 @@ def analyze(df: pd.DataFrame, adv: dict):
     
 
 # -------------------- Overview renderer --------------------
-DEFAULT_KEYS = ["AP","TP","PS_dist","AS_corr","AS_range","AS_area","VOnT","VOffT","Auto_On_ms","Auto_Off_ms","Auto_Dur_ms"]
+DEFAULT_KEYS = [
+    "AP", "TP", "PS_dist", "AS_corr", "AS_range", "AS_area",
+    "VOnT", "VOffT", "Auto_On_ms", "Auto_Off_ms", "Auto_Dur_ms",
+    # 신규 6종 표시 필수
+    "GAT_ms", "GOT_ms", "VOnT_env_ms", "VOffT_env_ms", "OID_ms", "TremorIndex"
+]
 
 def _val(x, ndig=4):
     try:
@@ -1131,6 +1136,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
