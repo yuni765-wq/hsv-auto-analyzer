@@ -36,6 +36,15 @@ REQUIRED_FUNCS = [
     compute_oid,
     tremor_index_psd,
 ]
+# ---- global numeric guard (v3.2 공용) ----
+def is_num(x):
+    try:
+        if x is None or isinstance(x, bool):
+            return False
+        return np.isfinite(float(x))
+    except Exception:
+        return False
+
 assert all(callable(f) for f in REQUIRED_FUNCS), "metrics functions not loaded"
 
 # -------------------- Global fixed settings (N–D′) --------------------
@@ -367,7 +376,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         return None
         
     import numpy as np
-    def _is_num(x):
+    def is_num(x):
         return isinstance(x, (int, float)) and np.isfinite(x)
         
     time_col   = pick("time")
@@ -514,7 +523,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     err_msgs = []
 
         # 안전한 숫자 판별 헬퍼
-    def _is_num(x):
+    def is_num(x):
         return isinstance(x, (int, float, np.integer, np.floating)) and np.isfinite(x)
 
     # 8-1) envelope
@@ -538,21 +547,21 @@ def analyze(df: pd.DataFrame, adv: dict):
         err_msgs.append(f"[detect] {type(e).__name__}: {e}")
             # 8-2b) 유효성 검사 + 폴백 적용
 # ✅ GAT는 대체 불가. 계산 실패 시 NaN 유지
-if not _is_num(gat_ms):
+if not is_num(gat_ms):
     gat_ms = np.nan
 
 # ✅ GOT 폴백 적용
-if not _is_num(got_ms):
-    if _is_num(vofft_ms) and _is_num(vont_ms_env):
+if not is_num(got_ms):
+    if is_num(vofft_ms) and is_num(vont_ms_env):
         got_ms = float(vofft_ms) - float(vont_ms_env)
-    elif _is_num(VOffT) and _is_num(VOnT):
+    elif is_num(VOffT) and is_num(VOnT):
         got_ms = float(VOffT) - float(VOnT)
     else:
         got_ms = np.nan
 
     # ---- GAT fallback (when None/NaN) ------------------------------
     # 빈칸 방지: VOnT_env → VOnT 순으로 보수적 대체
-    if not _is_num(gat_ms):
+    if not is_num(gat_ms):
         if np.isfinite(vont_ms_env):
             gat_ms = float(vont_ms_env)
             err_msgs.append("[GAT] fallback → VOnT_env")
@@ -569,7 +578,7 @@ if not _is_num(got_ms):
 # compute_oid : OID = VOffT_env − GOT (ms)
 # ===============================================
 def compute_oid(got_ms, vofft_ms):
-    if not _is_num(got_ms) or not _is_num(vofft_ms):
+    if not is_num(got_ms) or not is_num(vofft_ms):
         return np.nan
     # 필요 시 한 번 더 float 캐스팅
     got = float(got_ms)
@@ -1339,6 +1348,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
