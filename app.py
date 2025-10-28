@@ -537,51 +537,47 @@ def analyze(df: pd.DataFrame, adv: dict):
         oid_ms = np.nan
         err_msgs.append(f"[oid] {type(e).__name__}: {e}")
 
-# --------------------------------------------
-# tremor_index_psd (안정성 버전, 통째로 교체)
-# --------------------------------------------
-try:
-    if env_v32 is not None:
-        import numpy as np
-        from scipy.signal import welch
-        sig = np.asarray(env_v32, float)
-        sig = np.nan_to_num(sig, nan=0.0)
-        L = int(sig.size)
+    # --------------------------------------------
+    # tremor_index_psd (안정성 버전)
+    # --------------------------------------------
+    try:
+        if env_v32 is not None:
+            from scipy.signal import welch
+            sig = np.asarray(env_v32, float)
+            sig = np.nan_to_num(sig, nan=0.0)
+            L = int(sig.size)
 
-        if L < 64:
-            tremor_ratio = np.nan
-            err_msgs.append("[tremor] short signal (<64 samples)")
+            if L < 64:
+                tremor_ratio = np.nan
+                err_msgs.append("[tremor] short signal (<64 samples)")
+            else:
+                import math
+                target_len = max(32, int(fps * 0.35))
+                win_pow    = int(math.log2(max(32, min(L, target_len))))
+                nperseg    = 2 ** win_pow
+                nperseg    = max(32, min(nperseg, L))
+
+                noverlap   = min(nperseg // 2, nperseg - 1, max(0, L // 4))
+                if noverlap >= nperseg:
+                    noverlap = max(0, nperseg // 2 - 1)
+
+                f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
+
+                tgt = ((f >= 4.0) & (f <= 5.0))
+                tot = ((f >= 1.0) & (f <= 20.0))
+
+                num = np.trapz(Pxx[tgt], f[tgt]) if np.any(tgt) else 0.0
+                den = np.trapz(Pxx[tot], f[tot]) if np.any(tot) else 0.0
+
+                tremor_ratio = (num / den) if (den > 0 and np.isfinite(num)) else np.nan
         else:
-            import math
-            # fps 기반으로 대략 0.35 s 창 길이 선택, 2의 거듭제곱으로 근사
-            target_len = max(32, int(fps * 0.35))
-            win_pow    = int(math.log2(max(32, min(L, target_len))))
-            nperseg    = 2 ** win_pow
-            nperseg    = max(32, min(nperseg, L))
+            tremor_ratio = np.nan
 
-            # noverlap은 nperseg 절반 수준, 신호 길이 범위 내로 제한
-            noverlap   = min(nperseg // 2, nperseg - 1, max(0, L // 4))
-            if noverlap >= nperseg:
-                noverlap = max(0, nperseg // 2 - 1)
-
-            f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
-
-            # PSD 비율: 4–5 Hz / 1–20 Hz
-            tgt = ((f >= 4.0) & (f <= 5.0))
-            tot = ((f >= 1.0) & (f <= 20.0))
-
-            num = np.trapz(Pxx[tgt], f[tgt]) if np.any(tgt) else 0.0
-            den = np.trapz(Pxx[tot], f[tot]) if np.any(tot) else 0.0
-
-            tremor_ratio = (num / den) if (den > 0 and np.isfinite(num)) else np.nan
-    else:
+    except Exception as e:
         tremor_ratio = np.nan
+        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
-except Exception as e:
-    tremor_ratio = np.nan
-    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
-
-    # 디버그 노트(있을 때만)
+    # 디버그 노트
     if err_msgs:
         st.info("v3.2 calc notes:\n" + "\n".join(err_msgs))
 
@@ -614,7 +610,7 @@ except Exception as e:
     })
 
     # =====================================================
-    # v3.2 반환 패킷 구성 (analyze() 함수 내부, 들여쓰기 4칸)
+    # v3.2 반환 패킷 구성 (✅ analyze 함수 내부, 동일 인덴트)
     # =====================================================
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
@@ -626,8 +622,6 @@ except Exception as e:
         AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist,
         VOnT=VOnT, VOffT=VOffT,
-
-        # v3.2 신규
         env_v32=locals().get("env_v32", None),
         GAT_ms=gat_ms, GOT_ms=got_ms,
         VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
@@ -636,7 +630,6 @@ except Exception as e:
 
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
 
-    # analyze() 함수 "안쪽"에서 종료
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
     # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = [
@@ -1254,6 +1247,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
