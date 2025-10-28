@@ -522,7 +522,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     try:
         if env_v32 is not None:
             gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
-                env_v32, fps, k=1.0, min_run_ms=12, win_cycles=4, cv_max=0.12
+                env_v32, fps, k=1.0, min_run_ms=12, win_cycles=3, cv_max=0.25
             )
         else:
             gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
@@ -537,40 +537,49 @@ def analyze(df: pd.DataFrame, adv: dict):
         oid_ms = np.nan
         err_msgs.append(f"[oid] {type(e).__name__}: {e}")
 
-    # 8-4) Tremor Index (Welch)
-    try:
-        if env_v32 is not None:
-            import math
-            from scipy.signal import welch
+# --------------------------------------------
+# tremor_index_psd (안정성 버전, 통째로 교체)
+# --------------------------------------------
+try:
+    if env_v32 is not None:
+        import numpy as np
+        from scipy.signal import welch
+        sig = np.asarray(env_v32, float)
+        sig = np.nan_to_num(sig, nan=0.0)
+        L = int(sig.size)
 
-            sig = np.asarray(env_v32, float)
-            L = sig.size
-
-            if L < 64:
-                tremor_ratio = np.nan
-                err_msgs.append("[tremor] short signal (< 64 samples)")
-            else:
-                # 윈도/FFT 파라미터 자동 설정(안전 가드 포함)
-                win = int(max(64, min(L, 2 ** int(math.floor(math.log2(max(32, fps * 0.5)))))))
-                nperseg = max(32, min(win, L))
-                noverlap = max(0, min(nperseg - 1, nperseg // 2))
-
-                f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
-
-                tgt = ((f >= 4.0) & (f <= 5.0))
-                tot = ((f >= 1.0) & (f <= 20.0))
-
-                if np.any(tgt) and np.any(tot):
-                    tremor_ratio = (
-                        np.trapz(Pxx[tgt], f[tgt]) / np.trapz(Pxx[tot], f[tot])
-                    )
-                else:
-                    tremor_ratio = np.nan
-        else:
+        if L < 64:
             tremor_ratio = np.nan
-    except Exception as e:
+            err_msgs.append("[tremor] short signal (<64 samples)")
+        else:
+            import math
+            # fps 기반으로 대략 0.35 s 창 길이 선택, 2의 거듭제곱으로 근사
+            target_len = max(32, int(fps * 0.35))
+            win_pow    = int(math.log2(max(32, min(L, target_len))))
+            nperseg    = 2 ** win_pow
+            nperseg    = max(32, min(nperseg, L))
+
+            # noverlap은 nperseg 절반 수준, 신호 길이 범위 내로 제한
+            noverlap   = min(nperseg // 2, nperseg - 1, max(0, L // 4))
+            if noverlap >= nperseg:
+                noverlap = max(0, nperseg // 2 - 1)
+
+            f, Pxx = welch(sig, fs=fps, nperseg=nperseg, noverlap=noverlap)
+
+            # PSD 비율: 4–5 Hz / 1–20 Hz
+            tgt = ((f >= 4.0) & (f <= 5.0))
+            tot = ((f >= 1.0) & (f <= 20.0))
+
+            num = np.trapz(Pxx[tgt], f[tgt]) if np.any(tgt) else 0.0
+            den = np.trapz(Pxx[tot], f[tot]) if np.any(tot) else 0.0
+
+            tremor_ratio = (num / den) if (den > 0 and np.isfinite(num)) else np.nan
+    else:
         tremor_ratio = np.nan
-        err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+
+except Exception as e:
+    tremor_ratio = np.nan
+    err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
     # 디버그 노트(있을 때만)
     if err_msgs:
@@ -1192,6 +1201,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
