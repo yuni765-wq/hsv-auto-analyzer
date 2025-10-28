@@ -598,38 +598,40 @@ except Exception as e:
             "PS_dist (0=normal)",
             "Voice Onset Time (VOnT, ms)",
             "Voice Offset Time (VOffT, ms)",
-            "GAT (ms)", "GOT (ms)", "VOnT_env (ms)", "VOffT_env (ms)",
+            "GAT (ms)", "GOT (ms)",
+            "VOnT_env (ms)", "VOffT_env (ms)",
             "OID = VOffT_env − GOT (ms)",
             "Tremor Index (4–5 Hz, env)"
         ],
         "Value": [
-            AP, TP, AS_legacy, AS_range, AS_area, AS_corr, PS_sim, PS_dist,
-            VOnT, VOffT, gat_ms, got_ms, vont_ms_env, vofft_ms, oid_ms, tremor_ratio
+            AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
+            PS_sim, PS_dist,
+            VOnT, VOffT,
+            gat_ms, got_ms,
+            vont_ms_env, vofft_ms,
+            oid_ms, tremor_ratio
         ]
     })
 
-    # 10) 시각화용 viz 패킷
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
         E_on=E_on, E_off=E_off,
-        thr_on=Th_on, thr_off=Th_off, Tlow_on=Tl_on, Tlow_off=Tl_off,
+        thr_on=Th_on, thr_off=Th_off,
+        Tlow_on=Tl_on, Tlow_off=Tl_off,
         i_move=i_move, i_steady=i_steady, i_last=i_last, i_end=i_end,
         cycles=cycles,
-        AP=AP, TP=TP,
-        AS_legacy=AS_legacy, AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
+        AP=AP, TP=TP, AS_legacy=AS_legacy,
+        AS_range=AS_range, AS_area=AS_area, AS_corr=AS_corr,
         PS_sim=PS_sim, PS_dist=PS_dist,
         VOnT=VOnT, VOffT=VOffT,
-        # v3.2 신규
-        env_v32=locals().get("env_v32", None),
+        env_v32=env_v32,
         GAT_ms=gat_ms, GOT_ms=got_ms,
         VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
         OID_ms=oid_ms, TremorIndex=tremor_ratio,
     )
 
-    # 11) 반환
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
-
     
 # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = [
@@ -1198,6 +1200,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
