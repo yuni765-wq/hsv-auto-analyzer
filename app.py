@@ -613,7 +613,9 @@ except Exception as e:
         ]
     })
 
-    # 10) viz 패킷
+    # =====================================================
+    # v3.2 반환 패킷 구성 (analyze() 함수 내부, 들여쓰기 4칸)
+    # =====================================================
     viz = dict(
         t=t, total_s=total_s, left_s=left_s, right_s=right_s,
         E_on=E_on, E_off=E_off,
@@ -629,14 +631,14 @@ except Exception as e:
         env_v32=locals().get("env_v32", None),
         GAT_ms=gat_ms, GOT_ms=got_ms,
         VOnT_env_ms=vont_ms_env, VOffT_env_ms=vofft_ms,
-        OID_ms=oid_ms,
-        TremorIndex=tremor_ratio,
+        OID_ms=oid_ms, TremorIndex=tremor_ratio,
     )
 
     extras = dict(fps=fps, n_cycles=len(cycles), viz=viz)
+
+    # analyze() 함수 "안쪽"에서 종료
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
-    
-# -------------------- Overview renderer --------------------
+    # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = [
     "AP", "TP", "PS_dist", "AS_corr", "AS_range", "AS_area",
     "VOnT", "VOffT", "Auto_On_ms", "Auto_Off_ms", "Auto_Dur_ms",
@@ -1252,6 +1254,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
