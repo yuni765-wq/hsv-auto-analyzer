@@ -965,7 +965,7 @@ if "Stats" in tab_names and uploaded is not None:
             AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
             Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
         )
-render_overview(env)  # ✅ 여기서 QI 계산됨 & 세션에 저장됨
+    render_overview(env)  # ✅ 여기서 QI 계산됨 & 세션에 저장됨 
 
 # ✅ Summary formatting: Value column → 임상 표기 규칙 적용
 try:
@@ -1387,6 +1387,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
