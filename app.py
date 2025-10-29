@@ -36,6 +36,16 @@ REQUIRED_FUNCS = [
      compute_oid_metrics,
     tremor_index_psd,
 ]
+
+# ✅ R&D Analysis 화면 연결
+try:
+    from rnd_v3beta import render_rnd_v3beta
+except Exception as e:
+    def render_rnd_v3beta():
+        st.error("R&D Analysis 모듈(rnd_v3beta)을 불러올 수 없습니다.")
+        with st.expander("오류 상세"):
+            st.exception(e)
+            
 # ---- Common formatting utils (v3.2 UI rule) ----
 import math
 SMALL_EPS = 1e-3
@@ -121,6 +131,18 @@ inject_css(st)
 if "run_log" not in st.session_state:
     st.session_state["run_log"] = []
 st.session_state["run_log"].append(f"RUN_LOG: Preset Loaded = Stable_v3.1")
+
+# === App mode 선택 (Clinical vs R&D) ======================================
+mode = st.sidebar.selectbox(
+    "App mode",
+    ["Clinical Insight", "R&D Analysis v3β"],
+    index=0,
+)
+
+if mode == "R&D Analysis v3β":
+    render_rnd_v3beta()  # R&D 화면으로 전환
+    st.stop()
+# ========================================================================
 
 # ============== Colors ==============
 COLOR_TOTAL   = "#FF0000"
@@ -1409,6 +1431,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
