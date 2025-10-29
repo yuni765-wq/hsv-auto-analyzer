@@ -1004,29 +1004,25 @@ if (uploaded is not None) and ("Stats" in tab_names):
         if callable(globals().get("render_tremor_section")):
             render_tremor_section(st, tremor_val, band_label="4–5 Hz")
 
-# ✅ 4) pinned 배지를 "탭 위"에 1번만 렌더
+# ✅ 상단 pinned 배지: 절대 한 번만 렌더되도록 가드
+if "__qi_banner_drawn__" not in st.session_state:
+    st.session_state["__qi_banner_drawn__"] = False
+
 qi_latest = st.session_state.get("__qi_latest__")
+
 with top_banner:
-    if qi_latest is not None and callable(globals().get("render_quality_banner")):
+    if (
+        qi_latest is not None
+        and not st.session_state["__qi_banner_drawn__"]
+        and callable(globals().get("render_quality_banner"))
+    ):
         render_quality_banner(
             st,
             qi_latest,
             show_debug=st.session_state.get("debug_view", False),
-            pinned=True
+            pinned=True,
         )
-
-
-
-# ✅ 4) pinned 배지를 "탭 위"에 1번만 렌더
-qi_latest = st.session_state.get("__qi_latest__")
-with top_banner:
-    if qi_latest is not None:
-        render_quality_banner(
-            st,
-            qi_latest,
-            show_debug=st.session_state.get("debug_view", False),
-            pinned=True
-        )
+        st.session_state["__qi_banner_drawn__"] = True
 
 # 이후 기존 나머지 탭 콘텐트 유지
 
@@ -1412,6 +1408,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
