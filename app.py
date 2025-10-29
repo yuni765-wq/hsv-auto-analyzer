@@ -39,15 +39,13 @@ REQUIRED_FUNCS = [
 
 # ✅ R&D Analysis 화면 연결
 try:
-    from rnd_v3beta import render_rnd_v3beta  # 정상 Import
+    from rnd_v3beta import render_rnd_v3beta
 except Exception as e:
-    # Import 실패 시: fallback dummy 함수 정의
     def render_rnd_v3beta():
         st.error("R&D Analysis 모듈(rnd_v3beta)을 불러올 수 없습니다.")
         with st.expander("오류 상세"):
-            st.exception(e)  # as e 로 받은 오류 내용 표시
-        return  # 함수 종료 (추가 실행 방지)
-            
+            st.exception(e)
+           
 # ---- Common formatting utils (v3.2 UI rule) ----
 import math
 SMALL_EPS = 1e-3
@@ -1433,6 +1431,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
