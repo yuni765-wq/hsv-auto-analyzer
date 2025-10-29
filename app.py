@@ -803,7 +803,13 @@ def render_overview(env: dict, keys=None):
         for i, k in enumerate(row):
             with cols[i]:
                 st.metric(labels.get(k, k), metrics.get(k, "N/A"))
-
+    
+    # ---- Clinical note caption (badge 중복 대신 간단 캡션) ----
+    qi_latest = st.session_state.get("__qi_latest__")
+    if isinstance(qi_latest, dict):
+        note = qi_latest.get("clinical_note_ko") or qi_latest.get("note") or ""
+        if note:
+            st.caption(f"Clinical note: {note}")
 
     # ---- QC(선택) 메시지 계산 (기존 유지) ----
     fps  = env.get("fps", np.nan)
@@ -824,11 +830,6 @@ def render_overview(env: dict, keys=None):
     qi = compute_quality_from_env(env)
     st.session_state['__qi_latest__'] = qi
 
-    render_quality_banner(
-        st, qi,
-        show_debug=st.session_state.get('debug_view', False),
-        pinned=False
-    )
 
     # ✅ 마지막에 FPS/사이클 수 & QC 표기
     st.caption(f"FPS: {np.nan if not np.isfinite(fps) else round(float(fps), 1)} | 검출된 사이클 수: {ncyc}")
@@ -1009,7 +1010,6 @@ if "__qi_banner_drawn__" not in st.session_state:
     st.session_state["__qi_banner_drawn__"] = False
 
 qi_latest = st.session_state.get("__qi_latest__")
-
 with top_banner:
     if (
         qi_latest is not None
@@ -1023,6 +1023,7 @@ with top_banner:
             pinned=True,
         )
         st.session_state["__qi_banner_drawn__"] = True
+
 
 # 이후 기존 나머지 탭 콘텐트 유지
 
@@ -1408,6 +1409,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
