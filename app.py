@@ -950,6 +950,8 @@ else:
     # (B) 업로드가 있을 때: Overview → Stats
     tab_names = ["Stats", "Visualization", "Batch Offset", "Parameter Comparison"]
 
+# ✅ 상단 배지 영역(항상 생성)
+top_banner = st.container()
 
 # ✅ 2) 탭 생성
 tabs = st.tabs(tab_names)
@@ -1367,6 +1369,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
