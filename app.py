@@ -958,38 +958,63 @@ top_banner = st.container()
 tabs = st.tabs(tab_names)
 
 # ✅ 3) Stats 탭이 존재한다면 → 먼저 실행
-if "Stats" in tab_names and uploaded is not None:
+if (uploaded is not None) and ("Stats" in tab_names):
     with tabs[tab_names.index("Stats")]:
+        # --- Overview용 환경 값 ---
         env = dict(
             AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
             AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
             Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
         )
-    render_overview(env)  # ✅ 여기서 QI 계산됨 & 세션에 저장됨 
 
-# ✅ Summary formatting: Value column → 임상 표기 규칙 적용
-try:
-    summary_fmt = summary.copy()
-
-    if "Value" in summary_fmt.columns:
-        # 내부 helper: ms 단위 vs 일반 단위 포맷 구분
-        def _fmt_row(v, label=None):
-            if isinstance(label, str) and ("ms" in label.lower()):
-                return fmt_value(v, digits=2)  # ms는 2자리
-            return fmt_value(v, digits=3)     # 그 외는 3자리
-
-        if "Parameter" in summary_fmt.columns:
-            summary_fmt["Value"] = [
-                _fmt_row(v, lbl) for v, lbl in zip(summary_fmt["Value"], summary_fmt["Parameter"])
-            ]
+        # --- Overview 렌더 (정의 확인 후 호출) ---
+        if callable(globals().get("render_overview")):
+            render_overview(env)  # ✅ 여기서 QI 계산 & 세션 저장
         else:
-            summary_fmt["Value"] = summary_fmt["Value"].apply(lambda v: fmt_value(v, digits=3))
+            st.warning("Overview renderer unavailable. Showing summary table only.", icon="⚠️")
 
-    st.dataframe(summary_fmt, use_container_width=True)
+        # --- Summary formatting: Value column → 임상 표기 규칙 적용 ---
+        summary_obj = globals().get("summary", None)
+        if summary_obj is not None:
+            try:
+                summary_fmt = summary_obj.copy()
+                if "Value" in summary_fmt.columns:
+                    # ms 단위는 2자리, 그 외 3자리
+                    def _fmt_row(v, label=None):
+                        if isinstance(label, str) and ("ms" in label.lower()):
+                            return fmt_value(v, digits=2)
+                        return fmt_value(v, digits=3)
 
-except Exception:
-    # 예외 발생 시 fallback (원본 그대로)
-    st.dataframe(summary, use_container_width=True)
+                    if "Parameter" in summary_fmt.columns:
+                        summary_fmt["Value"] = [
+                            _fmt_row(v, lbl) for v, lbl in zip(summary_fmt["Value"], summary_fmt["Parameter"])
+                        ]
+                    else:
+                        summary_fmt["Value"] = summary_fmt["Value"].apply(lambda v: fmt_value(v, digits=3))
+                st.dataframe(summary_fmt, use_container_width=True)
+            except Exception:
+                # 포맷 실패 시 원본 출력
+                st.dataframe(summary_obj, use_container_width=True)
+
+        # --- Tremor 섹션 카드 (임상 한글 + Research note 영문) ---
+        try:
+            tremor_val = viz.get("TremorIndex") if isinstance(viz, dict) else tremor_value
+        except NameError:
+            tremor_val = None
+        if callable(globals().get("render_tremor_section")):
+            render_tremor_section(st, tremor_val, band_label="4–5 Hz")
+
+# ✅ 4) pinned 배지를 "탭 위"에 1번만 렌더
+qi_latest = st.session_state.get("__qi_latest__")
+with top_banner:
+    if qi_latest is not None and callable(globals().get("render_quality_banner")):
+        render_quality_banner(
+            st,
+            qi_latest,
+            show_debug=st.session_state.get("debug_view", False),
+            pinned=True
+        )
+
 
 
 # ✅ 4) pinned 배지를 "탭 위"에 1번만 렌더
@@ -1387,6 +1412,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
