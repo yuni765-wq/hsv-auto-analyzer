@@ -36,6 +36,49 @@ REQUIRED_FUNCS = [
      compute_oid_metrics,
     tremor_index_psd,
 ]
+# ---- Common formatting utils (v3.2 UI rule) ----
+import math
+SMALL_EPS = 1e-3
+
+def fmt_value(v, digits=3):
+    """숫자 표기 규칙: 소수점 3자리, 0~0.001 미만은 <0.001, NaN/inf/None는 N/A"""
+    try:
+        if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+            return "N/A"
+        v = float(v)
+        if abs(v) < SMALL_EPS and v != 0.0:
+            return "<0.001"
+        return f"{v:.{digits}f}"
+    except Exception:
+        return "N/A"
+def tremor_display(value, band_label="4–5 Hz"):
+    display = fmt_value(value)
+
+    # 임상 메시지(한글)
+    if display == "0.000" or display == "<0.001":
+        klin = (f"{band_label} 영역의 떨림 신호가 미약할 수 있습니다. "
+                "이는 떨림이 없다는 뜻이 아니라, 해당 대역 에너지가 낮거나 "
+                "주기 변동형 특성으로 분산되었음을 시사합니다.")
+    elif display == "N/A":
+        klin = "데이터 품질 저하·무성구간 과다·기준 미달 등으로 산출이 어려웠습니다."
+    else:
+        klin = f"{band_label} 대역에서 의미 있는 변조가 관찰됩니다."
+
+    # 연구자 노트(영문)
+    tip = (f"{band_label} band energy may be insufficient. In SD, tremor often "
+           "appears as cycle irregularity rather than a narrowband component, so "
+           "band-limited indices can under-estimate severity. Consider modulation-"
+           "based metrics or a wider band (e.g., 3–8 Hz) if justified.")
+
+    return display, klin, tip
+
+def render_tremor_section(st, tremor_value, band_label="4–5 Hz"):
+    val_str, klin_msg, tip_msg = tremor_display(tremor_value, band_label)
+    st.metric("Tremor Index", val_str)
+    st.caption(f"임상 해석: {klin_msg}")
+    with st.expander("Research note"):
+        st.write(tip_msg)
+
 # ---- global numeric guard (v3.2 공용) ----
 def is_num(x):
     try:
@@ -708,11 +751,11 @@ DEFAULT_KEYS = [
 
 def _val(x, ndig=4):
     try:
-        if x is None: return "N/A"
-        xf = float(x)
-        if np.isnan(xf) or np.isinf(xf):
+        if x is None:
             return "N/A"
-        return f"{xf:.{ndig}f}"
+        # ms 단위는 2자리, 그 외는 3자리
+        digits = 2 if ndig == 2 else 3
+        return fmt_value(x, digits=digits)
     except Exception:
         return "N/A"
 
@@ -898,22 +941,22 @@ if uploaded is not None:
     Auto_Dur_ms = det_res.get("duration_ms")
 
 # ---------------- Tabs 생성 및 Overview 실행 ----------------
+# (A) uploaded is None일 때
 if uploaded is None:
     st.info("📌 CSV/Excel 형식의 데이터를 업로드하면 분석/시각화 기능이 활성화됩니다.")
     st.markdown("---")
-    tab_names = ["Parameter Comparison", "Batch Offset"]  # 업로드가 없어도 일부 탭 사용 가능
+    tab_names = ["Parameter Comparison", "Batch Offset"]  # 업로드 없을 때는 그대로
 else:
-    tab_names = ["Overview", "Visualization", "Batch Offset", "Parameter Comparison"]
+    # (B) 업로드가 있을 때: Overview → Stats
+    tab_names = ["Stats", "Visualization", "Batch Offset", "Parameter Comparison"]
 
-# ✅ 1) pinned 배지를 넣을 상단 영역 확보
-top_banner = st.container()
 
 # ✅ 2) 탭 생성
 tabs = st.tabs(tab_names)
 
-# ✅ 3) Overview 탭이 존재한다면 → 먼저 실행
-if "Overview" in tab_names and uploaded is not None:
-    with tabs[tab_names.index("Overview")]:
+# ✅ 3) Stats 탭이 존재한다면 → 먼저 실행
+if "Stats" in tab_names and uploaded is not None:
+    with tabs[tab_names.index("Stats")]:
         env = dict(
             AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
             AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
@@ -921,6 +964,13 @@ if "Overview" in tab_names and uploaded is not None:
         )
         render_overview(env)  # ✅ 여기서 QI 계산됨 & 세션에 저장됨
         st.dataframe(summary, use_container_width=True)
+
+        # ✅ Tremor 섹션 카드 추가 (임상 한글 + Research note 영문)
+        try:
+            tremor_val = viz.get("TremorIndex") if isinstance(viz, dict) else tremor_value
+        except NameError:
+            tremor_val = None
+        render_tremor_section(st, tremor_val, band_label="4–5 Hz")
 
 # ✅ 4) pinned 배지를 "탭 위"에 1번만 렌더
 qi_latest = st.session_state.get("__qi_latest__")
@@ -1317,6 +1367,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
