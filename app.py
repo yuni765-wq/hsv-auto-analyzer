@@ -750,7 +750,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         "est_rmse": est_rmse,
         "global_gain": global_gain,
         "iters": iters,
-    }
+    })
 
     # 9) 결과표 구성 --------------------------------------------------------------
     summary = None  # UnboundLocal 방지
@@ -1568,6 +1568,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
