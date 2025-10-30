@@ -743,83 +743,78 @@ def analyze(df: pd.DataFrame, adv: dict):
     st.write("QC →", qc)
     st.write("preset:", preset_label)
 
+    
     # 9) 결과표 구성 --------------------------------------------------------------
     try:
-        # --- (요약표 만들기 바로 직전) QC 추출 블록 ---
+        # --- QC 추출(요약표 직전, 스코프 고정) ---
         qc_local = None
-        if "res_adapt" in locals():
+        if "res_adapt" in locals() and isinstance(res_adapt, dict):
             qc_local = res_adapt.get("adaptive_qc", None)
-        elif "qc_adapt" in locals():
-            qc_local = qc_adapt
+            preset_label_local = res_adapt.get("preset", "Adaptive v3.3")
+        else:
+            qc_local = qc_adapt if ("qc_adapt" in locals() and isinstance(qc_adapt, dict)) else None
+            preset_label_local = "Adaptive v3.3"
 
         def _pick2(d, *keys, default=None):
             if not isinstance(d, dict):
                 return default
             for k in keys:
-                if k in d and d[k] is not None:
-                    return d[k]
+                v = d.get(k, None)
+                if v is not None:
+                    return v
             return default
 
-        preset_label_local = (res_adapt.get("preset", "Adaptive v3.3")
-                              if "res_adapt" in locals() else "Adaptive v3.3")
-        qc_label_local    = _pick2(qc_local, "qc_label", "label", "quality_label", default=None)
-        noise_ratio_local = _pick2(qc_local, "noise_ratio", "noise", "noise_frac", "residual_noise", default=None)
-        est_rmse_local    = _pick2(qc_local, "est_rmse", "rmse", "est_error", default=None)
-        global_gain_local = _pick2(qc_local, "global_gain", "gain", default=None)
-        iters_local       = _pick2(qc_local, "iters", "n_iter", "iterations", default=None)
+        qc_label_local    = _pick2(qc_local, "qc_label", "label", "quality_label", default="N/A")
+        noise_ratio_local = _pick2(qc_local, "noise_ratio", "noise", "noise_frac", "residual_noise", default=np.nan)
+        est_rmse_local    = _pick2(qc_local, "est_rmse", "rmse", "est_error", default=np.nan)
+        global_gain_local = _pick2(qc_local, "global_gain", "gain", default=np.nan)
+        iters_local       = _pick2(qc_local, "iters", "n_iter", "iterations", default=np.nan)
 
-        # 표시용 포맷터
-        def _fmt(v):
+        # --- 포맷터(인덱스 의존 X) ---
+        def _fmt_num(v):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
-        def _fmt_pct(v):
-            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
+        def _fmt_ms(v):
+            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.2f}"
         def _fmt_f3(v):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.3f}"
+        def _fmt_pct(v):
+            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
+        def _fmt_int(v):
+            if v is None:
+                return "N/A"
+            try:
+                iv = int(v)
+                return str(iv)
+            except Exception:
+                return "N/A"
 
-        summary = pd.DataFrame({
-            "Parameter": [
-                "Amplitude Periodicity (AP)",
-                "Time Periodicity (TP)",
-                "AS (legacy, median p2p)",
-                "AS_range (robust)",
-                "AS_area (energy)",
-                "AS_corr (shape)",
-                "PS_sim (1=good)",
-                "PS_dist (0=normal)",
-                "Voice Onset Time (VOnT, ms)",
-                "Voice Offset Time (VOffT, ms)",
-                "GAT (ms)", "GOT (ms)",
-                "VOnT_env (ms)", "VOffT_env (ms)",
-                "OID = VOffT_env − GOT (ms)",
-                "Tremor Index (4–5 Hz, env)",
-                "Preset",
-                "QC Label",
-                "Residual Noise Ratio",
-                "RMSE (est.)",
-                "Global Gain (×)",
-                "QC Iters",
-            ],
-            "Value": [
-                AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
-                PS_sim, PS_dist,
-                VOnT, VOffT,
-                gat_ms, got_ms,
-                vont_ms_env, vofft_ms,
-                oid_ms, tremor_ratio,
-                preset_label_local,
-                qc_label_local,
-                _fmt_pct(noise_ratio_local),
-                _fmt_f3(est_rmse_local),
-                _fmt_f3(global_gain_local),
-                _fmt(iters_local),
-            ]
-        })
-
-        # 사람이 보기 좋은 문자열 처리 (이미 포맷된 항목 제외)
-        summary["Value"] = [
-            _fmt(v) if i not in {16,17,18,19,20,21} else v
-            for i, v in enumerate(summary["Value"])
+        # --- 값 자체를 최종 문자열(or 숫자)로 만들어 넣기 ---
+        rows = [
+            ("Amplitude Periodicity (AP)",            _fmt_f3(AP)),
+            ("Time Periodicity (TP)",                 _fmt_f3(TP)),
+            ("AS (legacy, median p2p)",               _fmt_f3(AS_legacy)),
+            ("AS_range (robust)",                     _fmt_f3(AS_range)),
+            ("AS_area (energy)",                      _fmt_f3(AS_area)),
+            ("AS_corr (shape)",                       _fmt_f3(AS_corr)),
+            ("PS_sim (1=good)",                       _fmt_f3(PS_sim)),
+            ("PS_dist (0=normal)",                    _fmt_f3(PS_dist)),
+            ("Voice Onset Time (VOnT, ms)",           _fmt_ms(VOnT)),
+            ("Voice Offset Time (VOffT, ms)",         _fmt_ms(VOffT)),
+            ("GAT (ms)",                              _fmt_ms(gat_ms)),
+            ("GOT (ms)",                              _fmt_ms(got_ms)),
+            ("VOnT_env (ms)",                         _fmt_ms(vont_ms_env)),
+            ("VOffT_env (ms)",                        _fmt_ms(vofft_ms)),
+            ("OID = VOffT_env − GOT (ms)",            _fmt_ms(oid_ms)),
+            ("Tremor Index (4–5 Hz, env)",            "<0.001" if (isinstance(tremor_ratio, float) and np.isfinite(tremor_ratio) and tremor_ratio < 0.001) else _fmt_f3(tremor_ratio)),
+            ("Preset",                                 preset_label_local if preset_label_local else "N/A"),
+            ("QC Label",                               qc_label_local if qc_label_local else "N/A"),
+            ("Residual Noise Ratio",                   _fmt_pct(noise_ratio_local)),
+            ("RMSE (est.)",                            _fmt_f3(est_rmse_local)),
+            ("Global Gain (×)",                        _fmt_f3(global_gain_local)),
+            ("QC Iters",                               _fmt_int(iters_local)),
         ]
+
+        summary = pd.DataFrame(rows, columns=["Parameter", "Value"])
 
     except Exception as e:
         summary = pd.DataFrame({"Parameter": [], "Value": []})
@@ -1549,6 +1544,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
