@@ -868,8 +868,8 @@ try:
         fps_safe = fps if 'fps' in locals() else np.nan
         n_cycles_safe = len(cycles) if 'cycles' in locals() else 0
         extras = dict(fps=fps_safe, n_cycles=n_cycles_safe, viz=viz)
-        except Exception as e:
-            extras = dict(fps=np.nan, n_cycles=0, viz={})
+    except Exception as e:
+        extras = dict(fps=np.nan, n_cycles=0, viz={})
         if 'err_msgs' in locals():
             err_msgs.append(f"[viz] {type(e).__name__}: {e}")
 
@@ -1543,6 +1543,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
