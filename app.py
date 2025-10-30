@@ -743,13 +743,17 @@ def analyze(df: pd.DataFrame, adv: dict):
     st.write("QC →", qc)
     st.write("preset:", preset_label)
 
+    # --- 최신 QC 값을 세션 캐시에 강제 동기화 ---
+    if "qc_cache" not in st.session_state:
+        st.session_state["qc_cache"] = {}
+
     st.session_state["qc_cache"].update({
-        "preset_label": preset_label,
-        "qc_label": qc_label,
-        "noise_ratio": noise_ratio,
-        "est_rmse": est_rmse,
-        "global_gain": global_gain,
-        "iters": iters,
+        "preset_label": preset_label if 'preset_label' in locals() else "Adaptive v3.3",
+        "qc_label": qc_label if 'qc_label' in locals() else None,
+        "noise_ratio": noise_ratio if 'noise_ratio' in locals() else None,
+        "est_rmse": est_rmse if 'est_rmse' in locals() else None,
+        "global_gain": global_gain if 'global_gain' in locals() else None,
+        "iters": iters if 'iters' in locals() else None,
     })
 
     # 9) 결과표 구성 --------------------------------------------------------------
@@ -1568,6 +1572,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
