@@ -4,10 +4,17 @@ from scipy.signal import savgol_filter, find_peaks, welch, hilbert
 
 # Adaptive Threshold Engine 연동 (모듈 경로 유연화)
 try:
-    from modules.adaptive_threshold import adaptive_optimize, AdaptiveParams
+    from modules.adaptive_threshold import (
+        adaptive_optimize,
+        AdaptiveParams,
+        detect_gat_got_with_adaptive,   # ✅ 이 줄만 추가
+    )
 except Exception:
-    from adaptive_threshold import adaptive_optimize, AdaptiveParams  # 대안 경로
-
+    from adaptive_threshold import (
+        adaptive_optimize,
+        AdaptiveParams,
+        detect_gat_got_with_adaptive,   # ✅ 이 줄만 추가
+    )
 
 # ---------- Envelope ----------
 def compute_envelope(gray, fs, sg_window=21, sg_poly=3, norm=True):
@@ -238,3 +245,4 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
