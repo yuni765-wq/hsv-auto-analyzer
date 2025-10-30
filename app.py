@@ -30,7 +30,6 @@ from metrics import (
     compute_oid as compute_oid_metrics,  # alias 유지
     tremor_index_psd,
 )
-from modules.adaptive_threshold import detect_gat_got_with_adaptive
 
 # 필수 함수 리스트 업데이트
 REQUIRED_FUNCS = [
@@ -1505,6 +1504,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
