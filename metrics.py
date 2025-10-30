@@ -1,11 +1,20 @@
+# modules/metrics.py
 import numpy as np
 from scipy.signal import savgol_filter, find_peaks, welch, hilbert
+
+# Adaptive Threshold Engine 연동 (모듈 경로 유연화)
+try:
+    from modules.adaptive_threshold import adaptive_optimize, AdaptiveParams
+except Exception:
+    from adaptive_threshold import adaptive_optimize, AdaptiveParams  # 대안 경로
+
 
 # ---------- Envelope ----------
 def compute_envelope(gray, fs, sg_window=21, sg_poly=3, norm=True):
     """
     gray: ROI gray-value 1D array
     fs: sampling rate in Hz (frame rate)
+    return: amplitude envelope (Hilbert + Savitzky–Golay)
     """
     x = np.asarray(gray).astype(float)
     if norm:
@@ -14,13 +23,23 @@ def compute_envelope(gray, fs, sg_window=21, sg_poly=3, norm=True):
     env = savgol_filter(env, sg_window, sg_poly, mode="interp")
     return env
 
-# ---------- Threshold ----------
+
+# ---------- Threshold (baseline/hysteresis) ----------
 def estimate_baseline_threshold(env, k=1.0):
+    """
+    env: amplitude envelope
+    k:  scale for robust spread
+    returns:
+      base:   robust baseline (P20)
+      thr_up: upper threshold   (base + k*sigma)
+      thr_dn: lower threshold   (base + 0.5*k*sigma)
+    """
     base = np.percentile(env, 20)  # robust baseline
     sigma = np.median(np.abs(env - base)) * 1.4826  # robust spread
     thr_up = base + k * sigma
     thr_dn = base + 0.5 * k * sigma  # hysteresis lower
     return base, thr_up, thr_dn
+
 
 # ---------- Periodicity quality ----------
 def periodicity_is_stable(peaks, fs, win_cycles=4, cv_max=0.12):
@@ -42,7 +61,8 @@ def periodicity_is_stable(peaks, fs, win_cycles=4, cv_max=0.12):
     stable_peaks = np.r_[np.zeros(1, dtype=bool), stable]
     return stable_peaks
 
-# ---------- Onset/Offset markers ----------
+
+# ---------- Onset/Offset markers (클래식) ----------
 def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_max=0.12):
     """
     Returns times in milliseconds: GAT, VOnT, GOT, VOffT
@@ -109,11 +129,102 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
 
     return ms(gat_idx), ms(vont_idx), ms(got_idx), ms(vofft_idx)
 
+
+# ---------- Onset/Offset markers (Adaptive v3.3) ----------
+def detect_gat_got_with_adaptive(env: np.ndarray,
+                                 fs: float,
+                                 k: float = 1.0,
+                                 min_run_ms: float = 12.0,
+                                 win_cycles: int = 4,
+                                 cv_max: float = 0.12,
+                                 adaptive_params: AdaptiveParams = AdaptiveParams(),
+                                 reference_marks=None):
+    """
+    Adaptive Threshold Engine 기반으로 GAT/GOT 계산.
+    1) baseline에서 upper-threshold(thr_up)를 base_threshold로 사용
+    2) adaptive_optimize로 지역 임계값 생성(thr_local)
+    3) 교차 기반으로 GAT/GOT 산출
+    4) QC 메트릭 반환
+    """
+    # 1) baseline/hysteresis 계산
+    base, thr_up, thr_dn = estimate_baseline_threshold(env, k=k)
+
+    # 2) Adaptive 엔진 실행 (base_threshold는 thr_up 사용)
+    ares = adaptive_optimize(env, sr_hz=fs, base_threshold=float(thr_up),
+                             params=adaptive_params, reference_marks=reference_marks)
+    thr_local = ares.thr_local
+
+    # 3) Adaptive 교차 기반 GAT/GOT
+    cross_up = np.where((env[:-1] < thr_local[:-1]) & (env[1:] >= thr_local[1:]))[0]
+    cross_dn = np.where((env[:-1] >= thr_local[:-1]) & (env[1:] <  thr_local[1:]))[0]
+
+    # GAT: thr_local 상향 교차가 일정 시간 이상 유지되는 최초 시점
+    min_run = int((min_run_ms / 1000.0) * fs)
+    gat_idx = None
+    run = 0
+    above_local = env >= thr_local
+    for i, a in enumerate(above_local):
+        run = run + 1 if a else 0
+        if run >= min_run:
+            gat_idx = i - run + 1
+            break
+
+    # VOnT: 안정적 주기성의 첫 peak
+    pk_idx, _ = find_peaks(env, height=np.minimum(thr_local, env.max() + 0.0))
+    vont_idx = None
+    if len(pk_idx):
+        stable_mask = periodicity_is_stable(pk_idx, fs, win_cycles=win_cycles, cv_max=cv_max)
+        if stable_mask.size and np.any(stable_mask):
+            vont_idx = pk_idx[stable_mask][0]
+
+    # VOffT/GOT: 안정적 구간의 마지막 peak와 thr_dn(down) 기준 이탈
+    vofft_idx = None
+    got_idx = None
+    if len(pk_idx) >= win_cycles + 1:
+        # fwd/bwd 안정성 교집합으로 stable peaks 추림
+        stable_fwd = periodicity_is_stable(pk_idx, fs, win_cycles=win_cycles, cv_max=cv_max)
+        pk_rev = (len(env) - 1) - pk_idx[::-1]
+        stable_bwd = periodicity_is_stable(pk_rev, fs, win_cycles=win_cycles, cv_max=cv_max)[::-1]
+        stable_both = stable_fwd & stable_bwd
+        stable_peaks = pk_idx[stable_both]
+        if len(stable_peaks):
+            vofft_idx = stable_peaks[-1]
+            # thr_dn은 baseline 기반 하강 히스테리시스 유지
+            start = vofft_idx + 1
+            below_dn = env < thr_dn
+            run = 0
+            for i in range(start, len(env)):
+                run = run + 1 if below_dn[i] else 0
+                if run >= min_run:
+                    got_idx = i - run + 1
+                    break
+
+    def ms(idx):
+        return None if idx is None else 1000.0 * (idx / fs)
+
+    return {
+        "gat_ms": ms(gat_idx),
+        "got_ms": ms(got_idx),
+        "vont_ms": ms(vont_idx),
+        "vofft_ms": ms(vofft_idx),
+        "thr_local": thr_local,
+        "adaptive_qc": {
+            "noise_ratio": ares.noise_ratio,
+            "global_gain": ares.global_gain,
+            "iters": ares.iters,
+            "est_rmse": ares.est_rmse,
+            "qc_label": ares.qc_label,
+        },
+        "preset": "Adaptive v3.3"
+    }
+
+
 # ---------- OID and Tremor ----------
 def compute_oid(got_ms, vofft_ms):
     if got_ms is None or vofft_ms is None:
         return None
     return max(0.0, vofft_ms - got_ms)
+
 
 def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     """
