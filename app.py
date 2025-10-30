@@ -688,28 +688,33 @@ def analyze(df: pd.DataFrame, adv: dict):
         tremor_ratio = np.nan
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
+
     # 8-5) 결과 dict 업데이트 (CSV 저장 전에) ---------------------------------------
     # QC 필드 추출 (여러 키 이름을 허용)
-    qc = None
-    if "res_adapt" in locals():
-        qc = res_adapt.get("adaptive_qc", None)
-    elif "qc_adapt" in locals():
-        qc = qc_adapt
+    qc = {}                      # ✅ 기본값을 dict로 (None 대신)
+    preset_label = "Adaptive v3.3"
+    
+    if "res_adapt" in locals() and isinstance(res_adapt, dict):   # ✅ 타입 방어
+        preset_label = res_adapt.get("preset", preset_label)
+        qc = res_adapt.get("adaptive_qc") or {}                   # ✅ None 방지
+    elif "qc_adapt" in locals() and isinstance(qc_adapt, dict):
+        qc = qc_adapt  # 폴백
     
     def _pick(d, *keys, default=None):
         if not isinstance(d, dict):
             return default
         for k in keys:
-            if k in d and d[k] is not None:
-                return d[k]
+            v = d.get(k, None)
+            if v is not None:
+                return v
         return default
     
-    preset_label = res_adapt.get("preset", "Adaptive v3.3") if "res_adapt" in locals() else "Adaptive v3.3"
-    qc_label    = _pick(qc, "qc_label", "label", "quality_label", default=None)
-    noise_ratio = _pick(qc, "noise_ratio", "noise", "noise_frac", "residual_noise", default=None)
-    est_rmse    = _pick(qc, "est_rmse", "rmse", "est_error", default=None)
-    global_gain = _pick(qc, "global_gain", "gain", default=None)
-    iters       = _pick(qc, "iters", "n_iter", "iterations", default=None)
+    qc_label    = _pick(qc, "qc_label", "label", "quality_label")
+    noise_ratio = _pick(qc, "noise_ratio", "noise", "noise_frac", "residual_noise")
+    est_rmse    = _pick(qc, "est_rmse", "rmse", "est_error")
+    global_gain = _pick(qc, "global_gain", "gain")
+    iters       = _pick(qc, "iters", "n_iter", "iterations")
+
 
     
     if "result_env" not in locals():
@@ -733,6 +738,12 @@ def analyze(df: pd.DataFrame, adv: dict):
         "global_gain": global_gain,
         "qc_iters": iters,
     })
+    
+    st.caption("QC Debug")
+    st.write("QC →", qc)
+    st.write("preset:", preset_label)
+
+    
 
     # 9) 결과표 구성 --------------------------------------------------------------
     try:
@@ -1508,6 +1519,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
