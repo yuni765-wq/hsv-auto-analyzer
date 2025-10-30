@@ -753,7 +753,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     }
 
     # 9) 결과표 구성 --------------------------------------------------------------
-    summary = None
+    summary = None  # 예외 시 UnboundLocalError 방지용 초기화
     try:
         # --- QC 추출(세션 캐시 우선) ---
         cache = st.session_state.get("qc_cache", {})
@@ -764,27 +764,7 @@ def analyze(df: pd.DataFrame, adv: dict):
         global_gain_local  = cache.get("global_gain", np.nan)
         iters_local        = cache.get("iters", np.nan)
 
-        def _pick2(d, *keys, default=None):
-            if not isinstance(d, dict):
-                return default
-            for k in keys:
-                v = d.get(k, None)
-                if v is not None:
-                    return v
-            return default
-
-        qc_label_local    = _pick2(cache, "qc_label", "label", "quality_label", default=qc_label_local)
-        noise_ratio_local = _pick2(cache, "noise_ratio", "noise", "noise_frac", "residual_noise", default=noise_ratio_local)
-        est_rmse_local    = _pick2(cache, "est_rmse", "rmse", "est_error", default=est_rmse_local)
-        global_gain_local = _pick2(cache, "global_gain", "gain", default=global_gain_local)
-        iters_local       = _pick2(cache, "iters", "n_iter", "iterations", default=iters_local)
-
-    except Exception as e:
-        st.warning(f"QC summary 구간에서 오류 발생: {e}")
-
-        # --- 포맷터(인덱스 의존 X) ---
-        def _fmt_num(v):
-            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
+        # --- 포맷터 ---
         def _fmt_ms(v):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.2f}"
         def _fmt_f3(v):
@@ -792,15 +772,12 @@ def analyze(df: pd.DataFrame, adv: dict):
         def _fmt_pct(v):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
         def _fmt_int(v):
-            if v is None:
-                return "N/A"
             try:
-                iv = int(v)
-                return str(iv)
+                return str(int(v))
             except Exception:
                 return "N/A"
 
-        # --- 값 자체를 최종 문자열(or 숫자)로 만들어 넣기 ---
+        # --- 값 자체를 최종 포맷으로 만들어 행 구성 ---
         rows = [
             ("Amplitude Periodicity (AP)",            _fmt_f3(AP)),
             ("Time Periodicity (TP)",                 _fmt_f3(TP)),
@@ -829,9 +806,16 @@ def analyze(df: pd.DataFrame, adv: dict):
         summary = pd.DataFrame(rows, columns=["Parameter", "Value"])
 
     except Exception as e:
-        summary = pd.DataFrame({"Parameter": [], "Value": []})
-        if 'err_msgs' in locals():
-            err_msgs.append(f"[summary] {type(e).__name__}: {e}")
+        st.warning(f"[summary] {type(e).__name__}: {e}")
+        # 최소 안전표(캐시 기반)라도 반환
+        summary = pd.DataFrame([
+            ("Preset",                cache.get("preset_label", "Adaptive v3.3")),
+            ("QC Label",              cache.get("qc_label", "N/A")),
+            ("Residual Noise Ratio",  _fmt_pct(cache.get("noise_ratio", np.nan))),
+            ("RMSE (est.)",           _fmt_f3(cache.get("est_rmse", np.nan))),
+            ("Global Gain (×)",       _fmt_f3(cache.get("global_gain", np.nan))),
+            ("QC Iters",              _fmt_int(cache.get("iters", np.nan))),
+        ], columns=["Parameter", "Value"])
 
     # 요약 직전 디버그 (동일 스코프)
     try:
@@ -1556,6 +1540,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
