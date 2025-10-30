@@ -713,6 +713,27 @@ if qc_adapt is not None:
     except Exception as e:
         tremor_ratio = np.nan
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
+  
+# 결과 dict 업데이트 (CSV 저장 전에)
+if "result_env" not in locals():
+    result_env = {}
+result_env.update({
+    "gat_ms": gat_ms,
+    "vont_ms": vont_ms_env,
+    "got_ms": got_ms,
+    "vofft_ms": vofft_ms,
+    "oid_ms": oid_ms,
+    "tremor_index": tremor_ratio,
+
+    # ✅ Adaptive QC
+    "preset": preset_label,
+    "qc_label": qc_label,
+    "noise_ratio": noise_ratio,
+    "est_rmse": est_rmse,
+    "global_gain": global_gain,
+    "qc_iters": iters,
+})
+
 
     # 9) 결과표 구성 ------------------------------------------------------------
 try:
@@ -1507,6 +1528,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
