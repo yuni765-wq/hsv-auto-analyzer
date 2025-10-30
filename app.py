@@ -751,7 +751,9 @@ def analyze(df: pd.DataFrame, adv: dict):
         "global_gain": global_gain,
         "iters": iters,
     }
+
     # 9) 결과표 구성 --------------------------------------------------------------
+    try:
         # --- QC 추출(세션 캐시 우선) ---
         cache = st.session_state.get("qc_cache", {})
         preset_label_local = cache.get("preset_label", "Adaptive v3.3")
@@ -770,11 +772,14 @@ def analyze(df: pd.DataFrame, adv: dict):
                     return v
             return default
 
-        qc_label_local    = _pick2(qc_local, "qc_label", "label", "quality_label", default="N/A")
-        noise_ratio_local = _pick2(qc_local, "noise_ratio", "noise", "noise_frac", "residual_noise", default=np.nan)
-        est_rmse_local    = _pick2(qc_local, "est_rmse", "rmse", "est_error", default=np.nan)
-        global_gain_local = _pick2(qc_local, "global_gain", "gain", default=np.nan)
-        iters_local       = _pick2(qc_local, "iters", "n_iter", "iterations", default=np.nan)
+        qc_label_local    = _pick2(cache, "qc_label", "label", "quality_label", default=qc_label_local)
+        noise_ratio_local = _pick2(cache, "noise_ratio", "noise", "noise_frac", "residual_noise", default=noise_ratio_local)
+        est_rmse_local    = _pick2(cache, "est_rmse", "rmse", "est_error", default=est_rmse_local)
+        global_gain_local = _pick2(cache, "global_gain", "gain", default=global_gain_local)
+        iters_local       = _pick2(cache, "iters", "n_iter", "iterations", default=iters_local)
+
+    except Exception as e:
+        st.warning(f"QC summary 구간에서 오류 발생: {e}")
 
         # --- 포맷터(인덱스 의존 X) ---
         def _fmt_num(v):
@@ -1550,6 +1555,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
