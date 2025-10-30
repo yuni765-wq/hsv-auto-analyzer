@@ -138,14 +138,20 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
 
 
 # ---------- Onset/Offset markers (Adaptive v3.3) ----------
+from typing import Optional
+
 def detect_gat_got_with_adaptive(env: np.ndarray,
                                  fs: float,
                                  k: float = 1.0,
                                  min_run_ms: float = 12.0,
                                  win_cycles: int = 4,
                                  cv_max: float = 0.12,
-                                 adaptive_params: AdaptiveParams = AdaptiveParams(),
+                                 adaptive_params: Optional[AdaptiveParams] = None,
                                  reference_marks=None):
+    # adaptive_params가 안 들어오면 새로 생성
+    if adaptive_params is None:
+        adaptive_params = AdaptiveParams()
+
     """
     Adaptive Threshold Engine 기반으로 GAT/GOT 계산.
     1) baseline에서 upper-threshold(thr_up)를 base_threshold로 사용
@@ -245,4 +251,5 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
