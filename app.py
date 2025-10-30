@@ -690,7 +690,11 @@ def analyze(df: pd.DataFrame, adv: dict):
 
     # 8-5) 결과 dict 업데이트 (CSV 저장 전에) ---------------------------------------
     # QC 필드 추출
-    qc = qc_adapt if ("qc_adapt" in locals()) else None
+    qc = None
+    if "res_adapt" in locals():
+         qc = res_adapt.get("adaptive_qc", None)
+   elif "qc_adapt" in locals():
+        qc = qc_adapt
     qc_label    = (qc or {}).get("qc_label", None)
     noise_ratio = (qc or {}).get("noise_ratio", None)
     est_rmse    = (qc or {}).get("est_rmse", None)
@@ -1488,6 +1492,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
