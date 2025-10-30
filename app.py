@@ -26,14 +26,16 @@ from insight_v32 import (
 )
 from metrics import (
     compute_envelope,
-    detect_gat_vont_got_vofft,
-    compute_oid as compute_oid_metrics,  # ← alias
+    detect_gat_got_with_adaptive,        # ✅ 새로운 Adaptive 함수
+    compute_oid as compute_oid_metrics,  # alias 유지
     tremor_index_psd,
 )
+
+# 필수 함수 리스트 업데이트
 REQUIRED_FUNCS = [
     compute_envelope,
-    detect_gat_vont_got_vofft,
-     compute_oid_metrics,
+    detect_gat_got_with_adaptive,        # ✅ 교체
+    compute_oid_metrics,
     tremor_index_psd,
 ]
 
@@ -597,38 +599,72 @@ def analyze(df: pd.DataFrame, adv: dict):
         return isinstance(x, (int, float, np.integer, np.floating)) and np.isfinite(x)
 
     # 8-1) envelope
-    try:
-        env_v32 = compute_envelope(total_s, fps)
-        env_v32 = np.nan_to_num(env_v32, nan=0.0)
-    except Exception as e:
-        env_v32 = None
-        err_msgs.append(f"[env] {type(e).__name__}: {e}")
+try:
+    env_v32 = compute_envelope(total_s, fps)
+    env_v32 = np.nan_to_num(env_v32, nan=0.0)
+except Exception as e:
+    env_v32 = None
+    err_msgs.append(f"[env] {type(e).__name__}: {e}")
 
-    # 8-2) GAT/GOT/VOnT_env/VOffT_env
-    try:
-        if env_v32 is not None:
-            gat_ms, vont_ms_env, got_ms, vofft_ms = detect_gat_vont_got_vofft(
-                env_v32, fps, k=1.0, min_run_ms=12, win_cycles=3, cv_max=0.25
-            )
-        else:
-            gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
-    except Exception as e:
+# 8-2) GAT/GOT/VOnT_env/VOffT_env (Adaptive v3.3)
+try:
+    if env_v32 is not None:
+        res_adapt = detect_gat_got_with_adaptive(
+            env=env_v32,
+            fs=float(fps),
+            k=1.0,
+            min_run_ms=12,
+            win_cycles=3,
+            cv_max=0.25,
+        )
+        gat_ms       = res_adapt["gat_ms"]
+        got_ms       = res_adapt["got_ms"]
+        vont_ms_env  = res_adapt["vont_ms"]
+        vofft_ms     = res_adapt["vofft_ms"]
+        qc_adapt     = res_adapt["adaptive_qc"]
+        preset_label = res_adapt.get("preset", "Adaptive v3.3")
+    else:
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
-        err_msgs.append(f"[detect] {type(e).__name__}: {e}")
+        qc_adapt = None
+        preset_label = "Adaptive v3.3 (no envelope)"
+except Exception as e:
+    gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
+    qc_adapt = None
+    preset_label = "Fallback (classic)"
+    err_msgs.append(f"[adaptive_detect] {type(e).__name__}: {e}")
 
-    # 8-2b) 유효성 검사 + 폴백 적용
-    # ✅ GAT는 계산 실패 시 NaN 유지(단, 표시 공백 방지를 위해 보수적 폴백 허용)
-    if not is_num(gat_ms):
+# 8-2b) 유효성 검사 + 폴백 적용
+if not is_num(gat_ms):
+    gat_ms = np.nan
+
+if not is_num(got_ms):
+    if is_num(vofft_ms) and is_num(vont_ms_env):
+        got_ms = float(vofft_ms) - float(vont_ms_env)
+    else:
+        VOnT_safe  = VOnT  if is_num(VOnT)  else np.nan
+        VOffT_safe = VOffT if is_num(VOffT) else np.nan
+        got_ms = (float(VOffT_safe) - float(VOnT_safe)) if (is_num(VOnT_safe) and is_num(VOffT_safe)) else np.nan
+
+if not is_num(gat_ms):
+    if is_num(vont_ms_env):
+        gat_ms = float(vont_ms_env)
+        err_msgs.append("[GAT] fallback → VOnT_env")
+    elif is_num(VOnT):
+        gat_ms = float(VOnT)
+        err_msgs.append("[GAT] fallback → VOnT")
+    else:
         gat_ms = np.nan
+        err_msgs.append("[GAT] unavailable")
 
-    # ✅ GOT 폴백: 우선 env 기반, 없으면 VOnT/VOffT 보조
-    if not is_num(got_ms):
-        if is_num(vofft_ms) and is_num(vont_ms_env):
-            got_ms = float(vofft_ms) - float(vont_ms_env)
-        else:
-            VOnT_safe  = VOnT  if is_num(VOnT)  else np.nan
-            VOffT_safe = VOffT if is_num(VOffT) else np.nan
-            got_ms = (float(VOffT_safe) - float(VOnT_safe)) if (is_num(VOnT_safe) and is_num(VOffT_safe)) else np.nan
+# (선택) QC 결과 로그에 표시
+if qc_adapt is not None:
+    st.info(
+        f"Adaptive QC → {qc_adapt['qc_label']} | "
+        f"Noise={qc_adapt['noise_ratio']*100:.1f}% | "
+        f"RMSE={qc_adapt['est_rmse']:.3f} | "
+        f"Gain={qc_adapt['global_gain']:.2f}× | "
+        f"Iter={qc_adapt['iters']} | Preset={preset_label}"
+    )
 
     # ✅ GAT 폴백: VOnT_env → VOnT 순
     if not is_num(gat_ms):
@@ -1431,6 +1467,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
