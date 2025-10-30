@@ -591,82 +591,56 @@ def analyze(df: pd.DataFrame, adv: dict):
         VOnT  = (t_steady - t_move) * 1000.0 if (np.isfinite(t_steady) and np.isfinite(t_move)) else np.nan
         VOffT = (t_end - t_last)   * 1000.0 if (np.isfinite(t_end)    and np.isfinite(t_last)) else np.nan
 
-    # 8) v3.2 envelope 기반 GAT/GOT + OID + Tremor
+    # 8) v3.3 envelope 기반 GAT/GOT + OID + Tremor --------------------------------
     err_msgs = []
 
-        # 안전한 숫자 판별 헬퍼
-    def is_num(x):
-        return isinstance(x, (int, float, np.integer, np.floating)) and np.isfinite(x)
-
     # 8-1) envelope
-try:
-    env_v32 = compute_envelope(total_s, fps)
-    env_v32 = np.nan_to_num(env_v32, nan=0.0)
-except Exception as e:
-    env_v32 = None
-    err_msgs.append(f"[env] {type(e).__name__}: {e}")
+    try:
+        env_v32 = compute_envelope(total_s, fps)
+        env_v32 = np.nan_to_num(env_v32, nan=0.0)
+    except Exception as e:
+        env_v32 = None
+        err_msgs.append(f"[env] {type(e).__name__}: {e}")
 
-# 8-2) GAT/GOT/VOnT_env/VOffT_env (Adaptive v3.3)
-try:
-    if env_v32 is not None:
-        res_adapt = detect_gat_got_with_adaptive(
-            env=env_v32,
-            fs=float(fps),
-            k=1.0,
-            min_run_ms=12,
-            win_cycles=3,
-            cv_max=0.25,
-        )
-        gat_ms       = res_adapt["gat_ms"]
-        got_ms       = res_adapt["got_ms"]
-        vont_ms_env  = res_adapt["vont_ms"]
-        vofft_ms     = res_adapt["vofft_ms"]
-        qc_adapt     = res_adapt["adaptive_qc"]
-        preset_label = res_adapt.get("preset", "Adaptive v3.3")
-    else:
+    # 8-2) GAT/GOT/VOnT_env/VOffT_env (Adaptive v3.3)
+    try:
+        if env_v32 is not None:
+            res_adapt = detect_gat_got_with_adaptive(
+                env=env_v32,
+                fs=float(fps),
+                k=1.0,
+                min_run_ms=12,
+                win_cycles=3,
+                cv_max=0.25,
+            )
+            gat_ms       = res_adapt["gat_ms"]
+            got_ms       = res_adapt["got_ms"]
+            vont_ms_env  = res_adapt["vont_ms"]
+            vofft_ms     = res_adapt["vofft_ms"]
+            qc_adapt     = res_adapt["adaptive_qc"]
+            preset_label = res_adapt.get("preset", "Adaptive v3.3")
+        else:
+            gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
+            qc_adapt = None
+            preset_label = "Adaptive v3.3 (no envelope)"
+    except Exception as e:
         gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
         qc_adapt = None
-        preset_label = "Adaptive v3.3 (no envelope)"
-except Exception as e:
-    gat_ms = got_ms = vont_ms_env = vofft_ms = np.nan
-    qc_adapt = None
-    preset_label = "Fallback (classic)"
-    err_msgs.append(f"[adaptive_detect] {type(e).__name__}: {e}")
+        preset_label = "Fallback (classic)"
+        err_msgs.append(f"[adaptive_detect] {type(e).__name__}: {e}")
 
-# 8-2b) 유효성 검사 + 폴백 적용
-if not is_num(gat_ms):
-    gat_ms = np.nan
-
-if not is_num(got_ms):
-    if is_num(vofft_ms) and is_num(vont_ms_env):
-        got_ms = float(vofft_ms) - float(vont_ms_env)
-    else:
-        VOnT_safe  = VOnT  if is_num(VOnT)  else np.nan
-        VOffT_safe = VOffT if is_num(VOffT) else np.nan
-        got_ms = (float(VOffT_safe) - float(VOnT_safe)) if (is_num(VOnT_safe) and is_num(VOffT_safe)) else np.nan
-
-if not is_num(gat_ms):
-    if is_num(vont_ms_env):
-        gat_ms = float(vont_ms_env)
-        err_msgs.append("[GAT] fallback → VOnT_env")
-    elif is_num(VOnT):
-        gat_ms = float(VOnT)
-        err_msgs.append("[GAT] fallback → VOnT")
-    else:
+    # 8-2b) 유효성 검사 + 폴백 적용
+    if not is_num(gat_ms):
         gat_ms = np.nan
-        err_msgs.append("[GAT] unavailable")
 
-# (선택) QC 결과 로그에 표시
-if qc_adapt is not None:
-    st.info(
-        f"Adaptive QC → {qc_adapt['qc_label']} | "
-        f"Noise={qc_adapt['noise_ratio']*100:.1f}% | "
-        f"RMSE={qc_adapt['est_rmse']:.3f} | "
-        f"Gain={qc_adapt['global_gain']:.2f}× | "
-        f"Iter={qc_adapt['iters']} | Preset={preset_label}"
-    )
+    if not is_num(got_ms):
+        if is_num(vofft_ms) and is_num(vont_ms_env):
+            got_ms = float(vofft_ms) - float(vont_ms_env)
+        else:
+            VOnT_safe  = VOnT  if is_num(VOnT)  else np.nan
+            VOffT_safe = VOffT if is_num(VOffT) else np.nan
+            got_ms = (float(VOffT_safe) - float(VOnT_safe)) if (is_num(VOnT_safe) and is_num(VOffT_safe)) else np.nan
 
-    # ✅ GAT 폴백: VOnT_env → VOnT 순
     if not is_num(gat_ms):
         if is_num(vont_ms_env):
             gat_ms = float(vont_ms_env)
@@ -713,87 +687,93 @@ if qc_adapt is not None:
     except Exception as e:
         tremor_ratio = np.nan
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
-  
 
-    # 9) 결과표 구성 ------------------------------------------------------------
-try:
-    # ✅ QC 기본값 안전 세팅 (Adaptive 호출부에서 만든 변수를 사용)
+    # 8-5) 결과 dict 업데이트 (CSV 저장 전에) ---------------------------------------
+    # QC 필드 추출
     qc = qc_adapt if ("qc_adapt" in locals()) else None
-    preset_label = preset_label if ("preset_label" in locals()) else "Adaptive v3.3"
-
-    # QC 필드 안전 접근
     qc_label    = (qc or {}).get("qc_label", None)
     noise_ratio = (qc or {}).get("noise_ratio", None)
     est_rmse    = (qc or {}).get("est_rmse", None)
     global_gain = (qc or {}).get("global_gain", None)
     iters       = (qc or {}).get("iters", None)
 
-    # 표시용 포맷터
-    def _fmt(v):
-        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
-
-    def _fmt_pct(v):
-        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
-
-    def _fmt_f3(v):
-        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.3f}"
-
-    summary = pd.DataFrame({
-        "Parameter": [
-            "Amplitude Periodicity (AP)",
-            "Time Periodicity (TP)",
-            "AS (legacy, median p2p)",
-            "AS_range (robust)",
-            "AS_area (energy)",
-            "AS_corr (shape)",
-            "PS_sim (1=good)",
-            "PS_dist (0=normal)",
-            "Voice Onset Time (VOnT, ms)",
-            "Voice Offset Time (VOffT, ms)",
-            "GAT (ms)", "GOT (ms)",
-            "VOnT_env (ms)", "VOffT_env (ms)",
-            "OID = VOffT_env − GOT (ms)",
-            "Tremor Index (4–5 Hz, env)",
-
-            # ✅ Adaptive QC (신규)
-            "Preset",
-            "QC Label",
-            "Residual Noise Ratio",
-            "RMSE (est.)",
-            "Global Gain (×)",
-            "QC Iters",
-        ],
-        "Value": [
-            AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
-            PS_sim, PS_dist,
-            VOnT, VOffT,
-            gat_ms, got_ms,
-            vont_ms_env, vofft_ms,
-            oid_ms, tremor_ratio,
-
-            # ✅ Adaptive QC 값들
-            preset_label,
-            qc_label,
-            _fmt_pct(noise_ratio),
-            _fmt_f3(est_rmse),
-            _fmt_f3(global_gain),
-            _fmt(iters),
-        ]
+    if "result_env" not in locals():
+        result_env = {}
+    result_env.update({
+        "gat_ms": gat_ms,
+        "vont_ms": vont_ms_env,
+        "got_ms": got_ms,
+        "vofft_ms": vofft_ms,
+        "oid_ms": oid_ms,
+        "tremor_index": tremor_ratio,
+        "preset": preset_label,
+        "qc_label": qc_label,
+        "noise_ratio": noise_ratio,
+        "est_rmse": est_rmse,
+        "global_gain": global_gain,
+        "qc_iters": iters,
     })
 
-    # 사람이 보기 좋은 문자열 처리 (위에서 포맷된 항목 제외)
-    summary["Value"] = [
-        _fmt(v) if i not in {16,17,18,19,20,21} else v
-        for i, v in enumerate(summary["Value"])
-    ]
+    # 9) 결과표 구성 --------------------------------------------------------------
+    try:
+        # 표시용 포맷터
+        def _fmt(v):
+            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
+        def _fmt_pct(v):
+            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
+        def _fmt_f3(v):
+            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.3f}"
 
-except Exception as e:
-    summary = pd.DataFrame({"Parameter": [], "Value": []})
-    if 'err_msgs' in locals():
-        err_msgs.append(f"[summary] {type(e).__name__}: {e}")
+        summary = pd.DataFrame({
+            "Parameter": [
+                "Amplitude Periodicity (AP)",
+                "Time Periodicity (TP)",
+                "AS (legacy, median p2p)",
+                "AS_range (robust)",
+                "AS_area (energy)",
+                "AS_corr (shape)",
+                "PS_sim (1=good)",
+                "PS_dist (0=normal)",
+                "Voice Onset Time (VOnT, ms)",
+                "Voice Offset Time (VOffT, ms)",
+                "GAT (ms)", "GOT (ms)",
+                "VOnT_env (ms)", "VOffT_env (ms)",
+                "OID = VOffT_env − GOT (ms)",
+                "Tremor Index (4–5 Hz, env)",
+                "Preset",
+                "QC Label",
+                "Residual Noise Ratio",
+                "RMSE (est.)",
+                "Global Gain (×)",
+                "QC Iters",
+            ],
+            "Value": [
+                AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
+                PS_sim, PS_dist,
+                VOnT, VOffT,
+                gat_ms, got_ms,
+                vont_ms_env, vofft_ms,
+                oid_ms, tremor_ratio,
+                preset_label,
+                qc_label,
+                _fmt_pct(noise_ratio),
+                _fmt_f3(est_rmse),
+                _fmt_f3(global_gain),
+                _fmt(iters),
+            ]
+        })
 
+        # 사람이 보기 좋은 문자열 처리 (이미 포맷된 항목 제외)
+        summary["Value"] = [
+            _fmt(v) if i not in {16,17,18,19,20,21} else v
+            for i, v in enumerate(summary["Value"])
+        ]
+    except Exception as e:
+        summary = pd.DataFrame({"Parameter": [], "Value": []})
+        if 'err_msgs' in locals():
+            err_msgs.append(f"[summary] {type(e).__name__}: {e}")
 
-    # 10) viz 패킷 -------------------------------------------------------------
+    # 10) viz 패킷 ---------------------------------------------------------------
     try:
         viz = dict(
             t=t if 't' in locals() else None,
@@ -821,7 +801,7 @@ except Exception as e:
             PS_dist=PS_dist if 'PS_dist' in locals() else np.nan,
             VOnT=VOnT if 'VOnT' in locals() else np.nan,
             VOffT=VOffT if 'VOffT' in locals() else np.nan,
-            # v3.2
+            # v3.3
             env_v32=locals().get("env_v32", None),
             GAT_ms=gat_ms if 'gat_ms' in locals() else np.nan,
             GOT_ms=got_ms if 'got_ms' in locals() else np.nan,
@@ -837,8 +817,8 @@ except Exception as e:
         extras = dict(fps=np.nan, n_cycles=0, viz={})
         if 'err_msgs' in locals():
             err_msgs.append(f"[viz] {type(e).__name__}: {e}")
-           
-    # 11) 반환(항상 실행) -------------------------------------------------------
+
+    # 11) 반환(항상 실행) ----------------------------------------------------------
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
 
     # -------------------- Overview renderer --------------------
@@ -1508,6 +1488,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
