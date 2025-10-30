@@ -705,7 +705,6 @@ def analyze(df: pd.DataFrame, adv: dict):
         return default
     
     preset_label = res_adapt.get("preset", "Adaptive v3.3") if "res_adapt" in locals() else "Adaptive v3.3"
-    
     qc_label    = _pick(qc, "qc_label", "label", "quality_label", default=None)
     noise_ratio = _pick(qc, "noise_ratio", "noise", "noise_frac", "residual_noise", default=None)
     est_rmse    = _pick(qc, "est_rmse", "rmse", "est_error", default=None)
@@ -715,6 +714,11 @@ def analyze(df: pd.DataFrame, adv: dict):
     
     if "result_env" not in locals():
         result_env = {}
+    def _num(x):
+        try:
+            return float(x)
+        except Exception:
+            return np.nan    
     result_env.update({
         "gat_ms": gat_ms,
         "vont_ms": vont_ms_env,
@@ -1504,6 +1508,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
