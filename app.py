@@ -693,7 +693,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     qc = None
     if "res_adapt" in locals():
          qc = res_adapt.get("adaptive_qc", None)
-   elif "qc_adapt" in locals():
+    elif "qc_adapt" in locals():
         qc = qc_adapt
     qc_label    = (qc or {}).get("qc_label", None)
     noise_ratio = (qc or {}).get("noise_ratio", None)
@@ -1492,6 +1492,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
