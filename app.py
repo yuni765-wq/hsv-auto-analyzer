@@ -743,7 +743,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     st.write("QC →", qc)
     st.write("preset:", preset_label)
 
-    st.session_state["qc_cache"] = {
+    st.session_state["qc_cache"].update({
         "preset_label": preset_label,
         "qc_label": qc_label,
         "noise_ratio": noise_ratio,
@@ -1568,6 +1568,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
