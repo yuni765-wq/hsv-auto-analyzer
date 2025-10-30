@@ -715,42 +715,82 @@ if qc_adapt is not None:
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
     # 9) 결과표 구성 ------------------------------------------------------------
-    try:
-        summary = pd.DataFrame({
-            "Parameter": [
-                "Amplitude Periodicity (AP)",
-                "Time Periodicity (TP)",
-                "AS (legacy, median p2p)",
-                "AS_range (robust)",
-                "AS_area (energy)",
-                "AS_corr (shape)",
-                "PS_sim (1=good)",
-                "PS_dist (0=normal)",
-                "Voice Onset Time (VOnT, ms)",
-                "Voice Offset Time (VOffT, ms)",
-                "GAT (ms)", "GOT (ms)",
-                "VOnT_env (ms)", "VOffT_env (ms)",
-                "OID = VOffT_env − GOT (ms)",
-                "Tremor Index (4–5 Hz, env)"
-            ],
-            "Value": [
-                AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
-                PS_sim, PS_dist,
-                VOnT, VOffT,
-                gat_ms, got_ms,
-                vont_ms_env, vofft_ms,
-                oid_ms, tremor_ratio
-            ]
-        })
-        # 표시 포맷: NaN/None → "N/A"
-        def _fmt(v):
-            return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
-        summary["Value"] = [_fmt(v) for v in summary["Value"]]
-    except Exception as e:
-        # 요약표 생성에서 예외가 나도 빈 표 반환
-        summary = pd.DataFrame({"Parameter": [], "Value": []})
-        if 'err_msgs' in locals():
-            err_msgs.append(f"[summary] {type(e).__name__}: {e}")
+try:
+    # ✅ QC 기본값 안전 세팅 (Adaptive 호출부에서 만든 변수를 사용)
+    qc = qc_adapt if ("qc_adapt" in locals()) else None
+    preset_label = preset_label if ("preset_label" in locals()) else "Adaptive v3.3"
+
+    # QC 필드 안전 접근
+    qc_label    = (qc or {}).get("qc_label", None)
+    noise_ratio = (qc or {}).get("noise_ratio", None)
+    est_rmse    = (qc or {}).get("est_rmse", None)
+    global_gain = (qc or {}).get("global_gain", None)
+    iters       = (qc or {}).get("iters", None)
+
+    # 표시용 포맷터
+    def _fmt(v):
+        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
+
+    def _fmt_pct(v):
+        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
+
+    def _fmt_f3(v):
+        return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.3f}"
+
+    summary = pd.DataFrame({
+        "Parameter": [
+            "Amplitude Periodicity (AP)",
+            "Time Periodicity (TP)",
+            "AS (legacy, median p2p)",
+            "AS_range (robust)",
+            "AS_area (energy)",
+            "AS_corr (shape)",
+            "PS_sim (1=good)",
+            "PS_dist (0=normal)",
+            "Voice Onset Time (VOnT, ms)",
+            "Voice Offset Time (VOffT, ms)",
+            "GAT (ms)", "GOT (ms)",
+            "VOnT_env (ms)", "VOffT_env (ms)",
+            "OID = VOffT_env − GOT (ms)",
+            "Tremor Index (4–5 Hz, env)",
+
+            # ✅ Adaptive QC (신규)
+            "Preset",
+            "QC Label",
+            "Residual Noise Ratio",
+            "RMSE (est.)",
+            "Global Gain (×)",
+            "QC Iters",
+        ],
+        "Value": [
+            AP, TP, AS_legacy, AS_range, AS_area, AS_corr,
+            PS_sim, PS_dist,
+            VOnT, VOffT,
+            gat_ms, got_ms,
+            vont_ms_env, vofft_ms,
+            oid_ms, tremor_ratio,
+
+            # ✅ Adaptive QC 값들
+            preset_label,
+            qc_label,
+            _fmt_pct(noise_ratio),
+            _fmt_f3(est_rmse),
+            _fmt_f3(global_gain),
+            _fmt(iters),
+        ]
+    })
+
+    # 사람이 보기 좋은 문자열 처리 (위에서 포맷된 항목 제외)
+    summary["Value"] = [
+        _fmt(v) if i not in {16,17,18,19,20,21} else v
+        for i, v in enumerate(summary["Value"])
+    ]
+
+except Exception as e:
+    summary = pd.DataFrame({"Parameter": [], "Value": []})
+    if 'err_msgs' in locals():
+        err_msgs.append(f"[summary] {type(e).__name__}: {e}")
+
 
     # 10) viz 패킷 -------------------------------------------------------------
     try:
@@ -1467,6 +1507,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
