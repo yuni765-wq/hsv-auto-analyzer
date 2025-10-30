@@ -244,3 +244,145 @@ def adaptive_optimize(envelope: np.ndarray,
         est_rmse=float(rmse),
         qc_label=label
     )
+
+# ===============================================================
+# Wrapper: detect_gat_got_with_adaptive
+# - app.py에서 바로 호출하는 엔트리 포인트
+#   res = detect_gat_got_with_adaptive(env, fs, k=1.0, min_run_ms=12, ...)
+#   -> { "gat_ms": ..., "got_ms": ..., "vont_ms": ..., "vofft_ms": ...,
+#        "preset": "Adaptive v3.3",
+#        "adaptive_qc": { "qc_label": ..., "noise_ratio": ..., "est_rmse": ...,
+#                         "global_gain": ..., "iters": ... } }
+# ===============================================================
+def _estimate_baseline_threshold(env: np.ndarray, k: float = 1.0):
+    """robust base + hysteresis (상단/하단 임계값)"""
+    base = np.percentile(env, 20)
+    mad  = np.median(np.abs(env - base)) * 1.4826
+    thr_up = base + k * mad
+    thr_dn = base + 0.5 * k * mad
+    return float(base), float(thr_up), float(thr_dn)
+
+def _first_persistent_index(mask: np.ndarray, min_run: int) -> int | None:
+    """mask가 True인 구간이 min_run 연속되는 첫 시작 index 반환"""
+    if min_run <= 1:
+        idx = int(np.argmax(mask))
+        return idx if mask[idx] else None
+    run = 0
+    for i, v in enumerate(mask):
+        run = run + 1 if v else 0
+        if run >= min_run:
+            return int(i - run + 1)
+    return None
+
+def detect_gat_got_with_adaptive(
+    env: np.ndarray,
+    fs: float,
+    k: float = 1.0,
+    min_run_ms: float = 12.0,
+    win_cycles: int = 3,   # 자리만 유지 (호출 시그니처 호환)
+    cv_max: float = 0.25,  # 자리만 유지
+):
+    """
+    1) 기본 임계값 추정(base, thr_up/thr_dn)
+    2) Adaptive 최적화로 thr_local/QC 추출
+    3) thr_local 기반 히스테리시스로 GAT/GOT/VOnT/VOffT 결정
+    4) app.py가 기대하는 dict 반환
+    """
+    env = np.asarray(env, dtype=float)
+    N = env.size
+    if N == 0 or fs <= 0:
+        return {
+            "gat_ms": np.nan, "got_ms": np.nan,
+            "vont_ms": np.nan, "vofft_ms": np.nan,
+            "preset": "Adaptive v3.3",
+            "adaptive_qc": {
+                "qc_label": "Unknown", "noise_ratio": np.nan,
+                "est_rmse": np.nan, "global_gain": np.nan, "iters": 0,
+            },
+        }
+
+    # 1) baseline + 기본 히스테리시스
+    base, thr_up, thr_dn = _estimate_baseline_threshold(env, k=k)
+
+    # 2) Adaptive 최적화 (QC 포함)
+    res = adaptive_optimize(env, sr_hz=float(fs), base_threshold=thr_up, params=None, reference_marks=None)
+
+    # 로컬 히스테리시스 상/하한 (로컬 임계값에 간단한 비율 적용)
+    thr_hi = res.thr_local
+    thr_lo = res.thr_local * 0.85  # 하한(여유) — 필요시 조절
+
+    # 3) 히스테리시스 기반 On/Off 마스크 생성
+    min_run = max(1, int(round((min_run_ms / 1000.0) * fs)))
+
+    above = env >= thr_hi
+    gat_idx = _first_persistent_index(above, min_run)
+
+    # 전체 True 구간(발성) 마스크를 만들기 위해 한 번 올라간 후엔 thr_lo로 유지
+    state = False
+    voiced = np.zeros(N, dtype=bool)
+    for i in range(N):
+        if not state:
+            # 시작: thr_hi 이상이 min_run 지속되면 True로 전환
+            if i == gat_idx:
+                state = True
+        else:
+            # 유지: thr_lo 이상이면 계속 True
+            if env[i] < thr_lo[i]:
+                state = False
+        voiced[i] = state
+
+    # VOnT/VOffT 계산: 첫 True 시작 이후 첫 안정 peak/혹은 단순 상한 구간의 중앙값 근사
+    # (여기서는 간단히 경계점으로 정의)
+    if np.any(voiced):
+        starts = np.flatnonzero((voiced.astype(int)[1:] - voiced.astype(int)[:-1]) == 1) + 1
+        ends   = np.flatnonzero((voiced.astype(int)[1:] - voiced.astype(int)[:-1]) == -1)
+        if voiced[0]:
+            starts = np.r_[0, starts]
+        if voiced[-1]:
+            ends = np.r_[ends, N - 1]
+
+        # 첫 발성 구간과 마지막 발성 구간을 사용
+        if len(starts) > 0:
+            i_on  = int(starts[0])
+            i_off = int(ends[-1])
+        else:
+            i_on = i_off = None
+    else:
+        i_on = i_off = None
+
+    # 지표 산출
+    gat_ms   = (1000.0 * gat_idx / fs) if gat_idx is not None else np.nan
+    # 간단화: VOnT/VOffT는 경계점으로 정의 (필요시 정교화 가능)
+    vont_ms  = (1000.0 * i_on  / fs) if i_on  is not None else np.nan
+    vofft_ms = (1000.0 * i_off / fs) if i_off is not None else np.nan
+
+    # GOT: 발성 종료 직전, thr_lo를 아래로 떨어져 안정적으로 유지되기 시작한 지점 근사
+    if i_off is not None:
+        below = env < thr_lo
+        got_idx = _first_persistent_index(below[i_off:], min_run)
+        if got_idx is not None:
+            got_idx = int(i_off + got_idx)
+        else:
+            # 종료점 근사
+            got_idx = i_off
+    else:
+        got_idx = None
+    got_ms = (1000.0 * got_idx / fs) if got_idx is not None else np.nan
+
+    # 4) 반환 패킷
+    adaptive_qc = {
+        "qc_label":   res.qc_label,        # "🟢 High" / "🟡 Medium" / "🔴 Low"
+        "noise_ratio": float(res.noise_ratio),
+        "est_rmse":    float(res.est_rmse) if res.est_rmse is not None else np.nan,
+        "global_gain": float(res.global_gain),
+        "iters":       int(res.iters),
+    }
+
+    return {
+        "gat_ms": float(gat_ms),
+        "got_ms": float(got_ms),
+        "vont_ms": float(vont_ms),
+        "vofft_ms": float(vofft_ms),
+        "preset": "Adaptive v3.3",
+        "adaptive_qc": adaptive_qc,
+    }
