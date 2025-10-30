@@ -835,6 +835,17 @@ def analyze(df: pd.DataFrame, adv: dict):
             ("QC Iters",                               _fmt_int(iters_local)),
         ]
 
+        # --- 최신 QC 값을 세션 캐시에 강제 동기화 ---
+        st.session_state["qc_cache"] = st.session_state.get("qc_cache", {})
+        st.session_state["qc_cache"].update({
+            "preset_label": preset_label,
+            "qc_label": qc_label,
+            "noise_ratio": noise_ratio,
+            "est_rmse": est_rmse,
+            "global_gain": global_gain,
+            "iters": iters,
+        })
+
         summary = pd.DataFrame(rows, columns=["Parameter", "Value"])
 
     except Exception as e:
@@ -1572,6 +1583,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
