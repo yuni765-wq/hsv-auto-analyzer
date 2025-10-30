@@ -182,13 +182,18 @@ def detect_gat_got_with_adaptive(env: np.ndarray,
             gat_idx = i - run + 1
             break
 
+            
     # VOnT: 안정적 주기성의 첫 peak
-    pk_idx, _ = find_peaks(env, height=np.minimum(thr_local, env.max() + 0.0))
+    pk_idx, _ = find_peaks(env)  # height 인자 제거
+    # thr_local보다 위에 있는 피크만 남김
+    pk_idx = pk_idx[env[pk_idx] >= thr_local[pk_idx]]
+    
     vont_idx = None
     if len(pk_idx):
         stable_mask = periodicity_is_stable(pk_idx, fs, win_cycles=win_cycles, cv_max=cv_max)
         if stable_mask.size and np.any(stable_mask):
             vont_idx = pk_idx[stable_mask][0]
+            
 
     # VOffT/GOT: 안정적 구간의 마지막 peak와 thr_dn(down) 기준 이탈
     vofft_idx = None
@@ -251,5 +256,6 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
 
