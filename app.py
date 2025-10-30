@@ -857,10 +857,10 @@ except Exception as e:
         extras = dict(fps=np.nan, n_cycles=0, viz={})
         if 'err_msgs' in locals():
             err_msgs.append(f"[viz] {type(e).__name__}: {e}")
-
+           
     # 11) 반환(항상 실행) -------------------------------------------------------
     return summary, pd.DataFrame(dict(cycle=[], start_time=[], end_time=[])), extras
-   
+
     # -------------------- Overview renderer --------------------
 DEFAULT_KEYS = [
     "AP", "TP", "PS_dist", "AS_corr", "AS_range", "AS_area",
@@ -1528,6 +1528,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
