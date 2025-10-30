@@ -743,17 +743,23 @@ def analyze(df: pd.DataFrame, adv: dict):
     st.write("QC →", qc)
     st.write("preset:", preset_label)
 
-    
+       st.session_state["qc_cache"] = dict(
+        preset_label=preset_label,
+        qc_label=qc_label,
+        noise_ratio=noise_ratio,
+        est_rmse=est_rmse,
+        global_gain=global_gain,
+        iters=iters
+    ) 
     # 9) 결과표 구성 --------------------------------------------------------------
-    try:
-        # --- QC 추출(요약표 직전, 스코프 고정) ---
-        qc_local = None
-        if "res_adapt" in locals() and isinstance(res_adapt, dict):
-            qc_local = res_adapt.get("adaptive_qc", None)
-            preset_label_local = res_adapt.get("preset", "Adaptive v3.3")
-        else:
-            qc_local = qc_adapt if ("qc_adapt" in locals() and isinstance(qc_adapt, dict)) else None
-            preset_label_local = "Adaptive v3.3"
+        # --- QC 추출(세션 캐시 우선) ---
+        cache = st.session_state.get("qc_cache", {})
+        preset_label_local = cache.get("preset_label", "Adaptive v3.3")
+        qc_label_local     = cache.get("qc_label", "N/A")
+        noise_ratio_local  = cache.get("noise_ratio", np.nan)
+        est_rmse_local     = cache.get("est_rmse", np.nan)
+        global_gain_local  = cache.get("global_gain", np.nan)
+        iters_local        = cache.get("iters", np.nan)
 
         def _pick2(d, *keys, default=None):
             if not isinstance(d, dict):
@@ -1544,6 +1550,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
