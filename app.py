@@ -441,16 +441,17 @@ def analyze(df: pd.DataFrame, adv: dict):
     cols = _norm_cols(df.columns.tolist())
     df = df.copy()
     df.columns = cols
+
     def pick(key):
         for c in cols:
             if key in c:
                 return c
         return None
-        
+
     import numpy as np
     def is_num(x):
         return isinstance(x, (int, float)) and np.isfinite(x)
-        
+
     time_col   = pick("time")
     left_col   = pick("left")
     right_col  = pick("right")
@@ -688,18 +689,17 @@ def analyze(df: pd.DataFrame, adv: dict):
         tremor_ratio = np.nan
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
-
     # 8-5) 결과 dict 업데이트 (CSV 저장 전에) ---------------------------------------
     # QC 필드 추출 (여러 키 이름을 허용)
-    qc = {}                      # ✅ 기본값을 dict로 (None 대신)
+    qc = {}                      # 기본값 dict
     preset_label = "Adaptive v3.3"
-    
-    if "res_adapt" in locals() and isinstance(res_adapt, dict):   # ✅ 타입 방어
+
+    if "res_adapt" in locals() and isinstance(res_adapt, dict):
         preset_label = res_adapt.get("preset", preset_label)
-        qc = res_adapt.get("adaptive_qc") or {}                   # ✅ None 방지
+        qc = res_adapt.get("adaptive_qc") or {}
     elif "qc_adapt" in locals() and isinstance(qc_adapt, dict):
-        qc = qc_adapt  # 폴백
-    
+        qc = qc_adapt
+
     def _pick(d, *keys, default=None):
         if not isinstance(d, dict):
             return default
@@ -708,22 +708,22 @@ def analyze(df: pd.DataFrame, adv: dict):
             if v is not None:
                 return v
         return default
-    
+
     qc_label    = _pick(qc, "qc_label", "label", "quality_label")
     noise_ratio = _pick(qc, "noise_ratio", "noise", "noise_frac", "residual_noise")
     est_rmse    = _pick(qc, "est_rmse", "rmse", "est_error")
     global_gain = _pick(qc, "global_gain", "gain")
     iters       = _pick(qc, "iters", "n_iter", "iterations")
 
-
-    
     if "result_env" not in locals():
         result_env = {}
+
     def _num(x):
         try:
             return float(x)
         except Exception:
-            return np.nan    
+            return np.nan
+
     result_env.update({
         "gat_ms": gat_ms,
         "vont_ms": vont_ms_env,
@@ -738,37 +738,36 @@ def analyze(df: pd.DataFrame, adv: dict):
         "global_gain": global_gain,
         "qc_iters": iters,
     })
-    
+
     st.caption("QC Debug")
     st.write("QC →", qc)
     st.write("preset:", preset_label)
 
-    
     # 9) 결과표 구성 --------------------------------------------------------------
     try:
         # --- (요약표 만들기 바로 직전) QC 추출 블록 ---
-        qc = None
+        qc_local = None
         if "res_adapt" in locals():
-            qc = res_adapt.get("adaptive_qc", None)
+            qc_local = res_adapt.get("adaptive_qc", None)
         elif "qc_adapt" in locals():
-            qc = qc_adapt
-    
-        def _pick(d, *keys, default=None):
+            qc_local = qc_adapt
+
+        def _pick2(d, *keys, default=None):
             if not isinstance(d, dict):
                 return default
             for k in keys:
                 if k in d and d[k] is not None:
                     return d[k]
             return default
-    
-        preset_label = (res_adapt.get("preset", "Adaptive v3.3")
-                        if "res_adapt" in locals() else "Adaptive v3.3")
-        qc_label    = _pick(qc, "qc_label", "label", "quality_label", default=None)
-        noise_ratio = _pick(qc, "noise_ratio", "noise", "noise_frac", "residual_noise", default=None)
-        est_rmse    = _pick(qc, "est_rmse", "rmse", "est_error", default=None)
-        global_gain = _pick(qc, "global_gain", "gain", default=None)
-        iters       = _pick(qc, "iters", "n_iter", "iterations", default=None)
-    
+
+        preset_label_local = (res_adapt.get("preset", "Adaptive v3.3")
+                              if "res_adapt" in locals() else "Adaptive v3.3")
+        qc_label_local    = _pick2(qc_local, "qc_label", "label", "quality_label", default=None)
+        noise_ratio_local = _pick2(qc_local, "noise_ratio", "noise", "noise_frac", "residual_noise", default=None)
+        est_rmse_local    = _pick2(qc_local, "est_rmse", "rmse", "est_error", default=None)
+        global_gain_local = _pick2(qc_local, "global_gain", "gain", default=None)
+        iters_local       = _pick2(qc_local, "iters", "n_iter", "iterations", default=None)
+
         # 표시용 포맷터
         def _fmt(v):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else v
@@ -776,7 +775,7 @@ def analyze(df: pd.DataFrame, adv: dict):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
         def _fmt_f3(v):
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.3f}"
-    
+
         summary = pd.DataFrame({
             "Parameter": [
                 "Amplitude Periodicity (AP)",
@@ -807,29 +806,36 @@ def analyze(df: pd.DataFrame, adv: dict):
                 gat_ms, got_ms,
                 vont_ms_env, vofft_ms,
                 oid_ms, tremor_ratio,
-                preset_label,
-                qc_label,
-                _fmt_pct(noise_ratio),
-                _fmt_f3(est_rmse),
-                _fmt_f3(global_gain),
-                _fmt(iters),
+                preset_label_local,
+                qc_label_local,
+                _fmt_pct(noise_ratio_local),
+                _fmt_f3(est_rmse_local),
+                _fmt_f3(global_gain_local),
+                _fmt(iters_local),
             ]
         })
-    
+
         # 사람이 보기 좋은 문자열 처리 (이미 포맷된 항목 제외)
         summary["Value"] = [
             _fmt(v) if i not in {16,17,18,19,20,21} else v
             for i, v in enumerate(summary["Value"])
         ]
-    
+
     except Exception as e:
         summary = pd.DataFrame({"Parameter": [], "Value": []})
         if 'err_msgs' in locals():
-            err_msgs.append(f"[summary] {type(e).__name__}: {e}")            
-st.write("✅ QC Debug:", preset_label, qc_label, noise_ratio, est_rmse, global_gain, iters)
+            err_msgs.append(f"[summary] {type(e).__name__}: {e}")
+
+    # 요약 직전 디버그 (동일 스코프)
+    try:
+        st.write("✅ QC Debug:", preset_label_local, qc_label_local, noise_ratio_local,
+                 est_rmse_local, global_gain_local, iters_local)
+    except Exception:
+        # local 변수 생성 실패 시 조용히 패스
+        pass
 
     # 10) viz 패킷 ---------------------------------------------------------------
-try:
+    try:
         viz = dict(
             t=t if 't' in locals() else None,
             total_s=total_s if 'total_s' in locals() else None,
@@ -1543,6 +1549,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
