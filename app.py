@@ -753,31 +753,59 @@ def analyze(df: pd.DataFrame, adv: dict):
     }
 
     # 9) 결과표 구성 --------------------------------------------------------------
-    summary = None  # 예외 시 UnboundLocalError 방지용 초기화
+    summary = None  # UnboundLocal 방지
     try:
-        # --- QC 추출(세션 캐시 우선) ---
+        # --- QC 추출(세션 캐시 우선 + 로컬 폴백) ---
         cache = st.session_state.get("qc_cache", {})
-        preset_label_local = cache.get("preset_label", "Adaptive v3.3")
-        qc_label_local     = cache.get("qc_label", "N/A")
-        noise_ratio_local  = cache.get("noise_ratio", np.nan)
-        est_rmse_local     = cache.get("est_rmse", np.nan)
-        global_gain_local  = cache.get("global_gain", np.nan)
-        iters_local        = cache.get("iters", np.nan)
+
+        # 1) 캐시 → 2) 로컬 변수 → 3) 최종 디폴트 순서로 폴백
+        preset_label_local = (
+            cache.get("preset_label")
+            or locals().get("preset_label")
+            or "Adaptive v3.3"
+        )
+        qc_label_local = (
+            cache.get("qc_label")
+            or locals().get("qc_label")
+            or "N/A"
+        )
+        # noise_ratio는 수치형이므로 None/NaN 처리 주의
+        noise_ratio_local = cache.get("noise_ratio")
+        if noise_ratio_local is None and "noise_ratio" in locals():
+            noise_ratio_local = noise_ratio
+
+        est_rmse_local = cache.get("est_rmse")
+        if est_rmse_local is None and "est_rmse" in locals():
+            est_rmse_local = est_rmse
+
+        global_gain_local = cache.get("global_gain")
+        if global_gain_local is None and "global_gain" in locals():
+            global_gain_local = global_gain
+
+        iters_local = cache.get("iters")
+        if iters_local is None and "iters" in locals():
+            iters_local = iters
 
         # --- 포맷터 ---
         def _fmt_ms(v):
+            import numpy as np
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.2f}"
+
         def _fmt_f3(v):
+            import numpy as np
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v):.3f}"
+
         def _fmt_pct(v):
+            import numpy as np
             return "N/A" if (v is None or (isinstance(v, float) and not np.isfinite(v))) else f"{float(v)*100:.1f}%"
+
         def _fmt_int(v):
             try:
                 return str(int(v))
             except Exception:
                 return "N/A"
 
-        # --- 값 자체를 최종 포맷으로 만들어 행 구성 ---
+        # --- 행 구성 ---
         rows = [
             ("Amplitude Periodicity (AP)",            _fmt_f3(AP)),
             ("Time Periodicity (TP)",                 _fmt_f3(TP)),
@@ -807,14 +835,14 @@ def analyze(df: pd.DataFrame, adv: dict):
 
     except Exception as e:
         st.warning(f"[summary] {type(e).__name__}: {e}")
-        # 최소 안전표(캐시 기반)라도 반환
+        # 안전 최소표
         summary = pd.DataFrame([
-            ("Preset",                cache.get("preset_label", "Adaptive v3.3")),
-            ("QC Label",              cache.get("qc_label", "N/A")),
-            ("Residual Noise Ratio",  _fmt_pct(cache.get("noise_ratio", np.nan))),
-            ("RMSE (est.)",           _fmt_f3(cache.get("est_rmse", np.nan))),
-            ("Global Gain (×)",       _fmt_f3(cache.get("global_gain", np.nan))),
-            ("QC Iters",              _fmt_int(cache.get("iters", np.nan))),
+            ("Preset",                preset_label_local if 'preset_label_local' in locals() else "Adaptive v3.3"),
+            ("QC Label",              qc_label_local     if 'qc_label_local' in locals() else "N/A"),
+            ("Residual Noise Ratio",  _fmt_pct(noise_ratio_local if 'noise_ratio_local' in locals() else np.nan)),
+            ("RMSE (est.)",           _fmt_f3(est_rmse_local if 'est_rmse_local' in locals() else np.nan)),
+            ("Global Gain (×)",       _fmt_f3(global_gain_local if 'global_gain_local' in locals() else np.nan)),
+            ("QC Iters",              _fmt_int(iters_local if 'iters_local' in locals() else np.nan)),
         ], columns=["Parameter", "Value"])
 
     # 요약 직전 디버그 (동일 스코프)
@@ -1540,6 +1568,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
