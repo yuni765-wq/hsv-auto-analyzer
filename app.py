@@ -689,18 +689,30 @@ def analyze(df: pd.DataFrame, adv: dict):
         err_msgs.append(f"[tremor] {type(e).__name__}: {e}")
 
     # 8-5) 결과 dict 업데이트 (CSV 저장 전에) ---------------------------------------
-    # QC 필드 추출
+    # QC 필드 추출 (여러 키 이름을 허용)
     qc = None
     if "res_adapt" in locals():
-         qc = res_adapt.get("adaptive_qc", None)
+        qc = res_adapt.get("adaptive_qc", None)
     elif "qc_adapt" in locals():
         qc = qc_adapt
-    qc_label    = (qc or {}).get("qc_label", None)
-    noise_ratio = (qc or {}).get("noise_ratio", None)
-    est_rmse    = (qc or {}).get("est_rmse", None)
-    global_gain = (qc or {}).get("global_gain", None)
-    iters       = (qc or {}).get("iters", None)
+    
+    def _pick(d, *keys, default=None):
+        if not isinstance(d, dict):
+            return default
+        for k in keys:
+            if k in d and d[k] is not None:
+                return d[k]
+        return default
+    
+    preset_label = res_adapt.get("preset", "Adaptive v3.3") if "res_adapt" in locals() else "Adaptive v3.3"
+    
+    qc_label    = _pick(qc, "qc_label", "label", "quality_label", default=None)
+    noise_ratio = _pick(qc, "noise_ratio", "noise", "noise_frac", "residual_noise", default=None)
+    est_rmse    = _pick(qc, "est_rmse", "rmse", "est_error", default=None)
+    global_gain = _pick(qc, "global_gain", "gain", default=None)
+    iters       = _pick(qc, "iters", "n_iter", "iterations", default=None)
 
+    
     if "result_env" not in locals():
         result_env = {}
     result_env.update({
@@ -1492,6 +1504,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
