@@ -753,6 +753,7 @@ def analyze(df: pd.DataFrame, adv: dict):
     }
 
     # 9) 결과표 구성 --------------------------------------------------------------
+    summary = None
     try:
         # --- QC 추출(세션 캐시 우선) ---
         cache = st.session_state.get("qc_cache", {})
@@ -1555,6 +1556,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
