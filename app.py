@@ -743,14 +743,14 @@ def analyze(df: pd.DataFrame, adv: dict):
     st.write("QC →", qc)
     st.write("preset:", preset_label)
 
-        st.session_state["qc_cache"] = dict(
-        preset_label=preset_label,
-        qc_label=qc_label,
-        noise_ratio=noise_ratio,
-        est_rmse=est_rmse,
-        global_gain=global_gain,
-        iters=iters
-    ) 
+    st.session_state["qc_cache"] = {
+        "preset_label": preset_label,
+        "qc_label": qc_label,
+        "noise_ratio": noise_ratio,
+        "est_rmse": est_rmse,
+        "global_gain": global_gain,
+        "iters": iters,
+    }
     # 9) 결과표 구성 --------------------------------------------------------------
         # --- QC 추출(세션 캐시 우선) ---
         cache = st.session_state.get("qc_cache", {})
@@ -1550,6 +1550,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
