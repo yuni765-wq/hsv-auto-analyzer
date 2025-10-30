@@ -829,7 +829,7 @@ def analyze(df: pd.DataFrame, adv: dict):
 st.write("✅ QC Debug:", preset_label, qc_label, noise_ratio, est_rmse, global_gain, iters)
 
     # 10) viz 패킷 ---------------------------------------------------------------
-    try:
+try:
         viz = dict(
             t=t if 't' in locals() else None,
             total_s=total_s if 'total_s' in locals() else None,
@@ -1543,6 +1543,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
