@@ -240,7 +240,7 @@ def detect_gat_got_with_adaptive(env: np.ndarray,
 # ---------- OID and Tremor ----------
 def compute_oid(got_ms, vofft_ms):
     if got_ms is None or vofft_ms is None:
-        return None
+        return np.nan
     return max(0.0, vofft_ms - got_ms)
 
 
@@ -256,6 +256,7 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
 
 
