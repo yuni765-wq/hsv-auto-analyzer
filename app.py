@@ -1209,7 +1209,7 @@ if uploaded is not None:
 
 # ---------------- Tabs 생성 & Overview 실행 (고정 순서: Stats가 항상 첫 번째) ----------------
 TAB_NAMES = ["Stats", "Visualization", "Batch Offset", "Parameter Comparison"]
-
+tab_names = TAB_NAMES
 # 상단 배지 영역(항상 생성)
 top_banner = st.container()
 
@@ -1685,6 +1685,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
