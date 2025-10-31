@@ -742,8 +742,8 @@ def analyze(df: pd.DataFrame, adv: dict):
         "gat_ms": _num(gat_ms),
 
         # ✅ 정확한 UI 키 (env 기반)
-        "vont_ms_env": _num(vont_ms_env),
-        "vofft_ms_env": _num(vofft_ms),
+        "vont_ms": _num(vont_ms_env),
+        "vofft_ms": _num(vofft_ms),
 
         "got_ms": _num(got_ms),
 
@@ -769,6 +769,10 @@ def analyze(df: pd.DataFrame, adv: dict):
         if isinstance(iters, (int, np.integer, float)) and np.isfinite(iters)
         else 0,
     })
+    # ✅ 세션 상태에 즉시 반영 (렌더링 섹션/콜백에서도 접근 가능)
+    import streamlit as st
+    st.session_state["result_env"] = dict(result_env)
+
 
     st.caption("QC Debug")
     st.write("QC →", qc)
@@ -982,12 +986,37 @@ def to_scalar(x):
         
 def render_overview(env: dict, keys=None):
     st.subheader("🩺 Overview")
-    metrics = {k: _val(env.get(k), 4 if "ms" not in k else 2) for k in env.keys()}
+    # ✅ env에 없으면 session_state["result_env"]에서 폴백 검색
+    ss_env = st.session_state.get("result_env", {}) if "result_env" in st.session_state else {}
+
+    alias_map = {
+        "GAT_ms":       ("gat_ms", "GAT_ms"),
+        "GOT_ms":       ("got_ms", "GOT_ms"),
+        "VOnT_env_ms":  ("vont_ms_env", "VOnT_env_ms"),
+        "VOffT_env_ms": ("vofft_ms_env", "vofft_ms", "VOffT_env_ms"),
+        "OID_ms":       ("oid_ms", "OID_ms"),
+        "TremorIndex":  ("tremor_index", "TremorIndex"),
+    }
+
+    def _get_from_sources(k):
+        v = env.get(k, None)
+        if (v is None or (isinstance(v, float) and not np.isfinite(v))) and isinstance(ss_env, dict):
+            for a in alias_map.get(k, (k,)):
+                if a in ss_env:
+                    v = ss_env[a]
+                    break
+        return v
+
+    # ✅ 라벨 (신규 6종 포함)
     labels = {
         "AP":"AP","TP":"TP","PS_dist":"PS_dist (0=정상)","AS_corr":"AS_corr",
         "AS_range":"AS_range","AS_area":"AS_area",
         "VOnT":"VOnT (ms)","VOffT":"VOffT (ms)",
         "Auto_On_ms":"Auto On (ms)","Auto_Off_ms":"Auto Off (ms)","Auto_Dur_ms":"Auto Duration (ms)",
+        "GAT_ms":"GAT (ms)","GOT_ms":"GOT (ms)",
+        "VOnT_env_ms":"VOnT_env (ms)","VOffT_env_ms":"VOffT_env (ms)",
+        "OID_ms":"OID = VOffT_env − GOT (ms)",
+        "TremorIndex":"Tremor Index (4–5 Hz, env)",
     }
 
     default = st.session_state.get("overview_keys", DEFAULT_KEYS)
@@ -997,9 +1026,15 @@ def render_overview(env: dict, keys=None):
         default=default,
         key="ov_keys_ms"
     )
-
     st.session_state["overview_keys"] = sel
     keys = sel
+
+    def _digits_for(k):
+        return 2 if "ms" in k.lower() else 4
+
+    # ✅ env + session_state 폴백 반영
+    metrics = {k: _val(_get_from_sources(k), _digits_for(k)) for k in keys}
+
 
     # ✅ 여기 붙여넣기
     rows = [keys[:4], keys[4:8], keys[8:12]]
@@ -1171,6 +1206,13 @@ if (uploaded is not None) and ("Stats" in tab_names):
             AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
             AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
             Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
+                # ✅ 신규 6종: viz 패킷에서 끌어다 Overview로 전달
+            GAT_ms      = viz.get("GAT_ms"),
+            GOT_ms      = viz.get("GOT_ms"),
+            VOnT_env_ms = viz.get("VOnT_env_ms"),
+            VOffT_env_ms= viz.get("VOffT_env_ms"),
+            OID_ms      = viz.get("OID_ms"),
+            TremorIndex = viz.get("TremorIndex"),
         )
 
         # --- Overview 렌더 (정의 확인 후 호출) ---
@@ -1180,7 +1222,7 @@ if (uploaded is not None) and ("Stats" in tab_names):
             st.warning("Overview renderer unavailable. Showing summary table only.", icon="⚠️")
 
         # --- Summary formatting: Value column → 임상 표기 규칙 적용 ---
-        summary_obj = globals().get("summary", None)
+        summary_obj = summary  # ✅ 스코프 변수 직접 사용
         if summary_obj is not None:
             try:
                 summary_fmt = summary_obj.copy()
@@ -1614,6 +1656,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
