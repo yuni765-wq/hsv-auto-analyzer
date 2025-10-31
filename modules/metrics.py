@@ -4,7 +4,7 @@ from scipy.signal import savgol_filter, find_peaks, welch, hilbert
 
 # --- Adaptive 엔진 사용/모드 설정 ---
 USE_ADAPTIVE = True              # 필요 시 False로 레거시만 사용
-ADAPTIVE_MODE = "full"           # "full" | "lite" (현재 호출 시 직접 쓰진 않지만 추후 전달용)
+ADAPTIVE_MODE = "full"           # "full" | "lite" (현재는 표시/전달용)
 
 # Adaptive Threshold Engine (single source of truth)
 from modules.adaptive_threshold import detect_gat_got_with_adaptive
@@ -160,3 +160,4 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
