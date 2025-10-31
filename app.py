@@ -120,11 +120,25 @@ MAIN_SUSTAIN_FR       = 90
 AUX_SUSTAIN_FR        = 45
 DEBOUNCE_FR           = 20
 
-# === v3.2 페이지 타이틀/버전 라벨 ===
-VERSION_LABEL = VERSION_V32
+# === Version / Page header (auto) ===
+from modules.metrics import USE_ADAPTIVE  # True면 Adaptive(v3.3), False면 Legacy(v3.2)
+
+if USE_ADAPTIVE:
+    VERSION_LABEL = "HSV Auto Analyzer v3.3 — Adaptive Clinical Engine (Stable)"
+    CAPTION_TEXT  = "Isaka × Lian | Preset: Stable v3.3 | Adaptive Threshold Engine + Auto QC"
+else:
+    VERSION_LABEL = "HSV Auto Analyzer v3.2 — Clinical Insight Release"
+    CAPTION_TEXT  = "Isaka × Lian | Stable preset + Stats auto-load + Quality indicator + Clinical notes + Pinned banner"
+
+import streamlit as st
 st.set_page_config(page_title=VERSION_LABEL, layout="wide")
 st.title(VERSION_LABEL)
-st.caption("Isaka × Lian | Stable preset + Stats auto-load + Quality indicator + Clinical notes + Pinned banner")
+st.caption(CAPTION_TEXT)
+if USE_ADAPTIVE:
+    st.sidebar.success("Preset: Stable v3.3 (Adaptive)\n· 자동 임계값 + Auto QC", icon="✅")
+else:
+    st.sidebar.info("Preset: Stable v3.2 (임상용)\n· 매개변수는 숨김 처리", icon="ℹ️")
+
 
 # v3.2 고정배너용 CSS
 inject_css(st)
@@ -1583,6 +1597,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
