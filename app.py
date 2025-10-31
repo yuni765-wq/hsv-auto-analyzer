@@ -927,6 +927,11 @@ def analyze(df: pd.DataFrame, adv: dict):
     except Exception:
         # local 변수 생성 실패 시 조용히 패스
         pass
+        # ✅ 추가: result_env 내부 키 확인 (env 관련 키 존재 여부 확인용)
+    try:
+        st.write("🔍 DEBUG result_env keys:", list(result_env.keys()))
+    except Exception as e:
+        st.write("⚠️ result_env not found or invalid:", str(e))    
 
     # 10) viz 패킷 ---------------------------------------------------------------
     try:
@@ -1706,6 +1711,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
