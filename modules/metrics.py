@@ -77,7 +77,7 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
              and loses stability for >= min_run_ms
       VOffT= last peak time before stable periodicity disappears completely
     """
-        # --- [ADD] Adaptive 엔진 분기 (성공하면 바로 반환, 실패시 폴백) ---
+    # --- [ADD] Adaptive 엔진 분기 (성공하면 바로 반환, 실패시 폴백) ---
     if USE_ADAPTIVE:
         try:
             res = detect_gat_got_with_adaptive(
@@ -87,16 +87,16 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
                 min_run_ms=min_run_ms,
                 win_cycles=win_cycles,
                 cv_max=cv_max,
-                # adaptive_params / reference_marks 필요 시 전달 가능
             )
-            # 이 함수의 반환 순서를 유지: (GAT, VOnT, GOT, VOffT)
+            # 이 함수의 반환 순서 유지: (GAT, VOnT, GOT, VOffT)
             return res["gat_ms"], res["vont_ms"], res["got_ms"], res["vofft_ms"]
         except Exception:
             # 폴백: 아래 클래식 경로 계속 수행
             pass
+
     base, thr_up, thr_dn = estimate_baseline_threshold(env, k=k)
     n = len(env)
-    t = np.arange(n) / fs
+    t = np.arange(n) / fs  # (사용 안 하면 삭제해도 무방)
 
     # Crossings above threshold
     above = env >= thr_up
@@ -119,32 +119,25 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
             vont_idx = stable_peaks[0]
 
     # For offset we operate from the tail
-    # Find last stretch of stable periodicity
     vofft_idx = None
     got_idx = None
     if len(pk_idx) >= win_cycles + 1:
-        # mark stability forward
         stable_peaks_mask_fwd = periodicity_is_stable(pk_idx, fs, win_cycles=win_cycles, cv_max=cv_max)
-        # mark stability backward by reversing the signal
         pk_rev = (n - 1) - pk_idx[::-1]
         stable_peaks_mask_bwd = periodicity_is_stable(pk_rev, fs, win_cycles=win_cycles, cv_max=cv_max)[::-1]
-
-        # a peak is inside stable phonation if both fwd and bwd consider it stable neighborhood
         both = stable_peaks_mask_fwd & stable_peaks_mask_bwd
         stable_peaks = pk_idx[both]
         if len(stable_peaks):
-            vofft_idx = stable_peaks[-1]  # last stable peak time
-            # search forward from last stable peak to detect persistent drop below thr_dn
+            vofft_idx = stable_peaks[-1]
             start = vofft_idx + 1
             below = env < thr_dn
             run = 0
             for i in range(start, n):
                 run = run + 1 if below[i] else 0
                 if run >= min_run:
-                    got_idx = i - run + 1  # onset of instability below lower hysteresis
+                    got_idx = i - run + 1
                     break
 
-    # Convert to milliseconds with safety
     def ms(idx):
         return None if idx is None else 1000.0 * (idx / fs)
 
@@ -270,6 +263,7 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
 
 
