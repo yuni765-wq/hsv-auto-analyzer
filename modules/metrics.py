@@ -126,3 +126,4 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
