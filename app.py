@@ -1287,6 +1287,9 @@ with tabs[TAB_NAMES.index("Stats")]:
                         ]
                     else:
                         summary_fmt["Value"] = summary_fmt["Value"].apply(lambda v: fmt_value(v, digits=3))
+
+                summary_fmt = _strip_na_env_rows(summary_fmt)
+                
                 st.dataframe(summary_fmt, use_container_width=True)
             except Exception:
                 st.dataframe(summary_obj, use_container_width=True)
@@ -1703,6 +1706,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
