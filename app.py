@@ -24,7 +24,7 @@ except Exception:
 from insight_v32 import (
     VERSION_V32, compute_quality_from_env, render_quality_banner, inject_css
 )
-from metrics import (
+from modules.metrics import (
     compute_envelope,
     detect_gat_got_with_adaptive,        # ✅ 새로운 Adaptive 함수
     compute_oid as compute_oid_metrics,  # alias 유지
@@ -1583,6 +1583,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
