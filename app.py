@@ -1245,6 +1245,24 @@ with tabs[TAB_NAMES.index("Stats")]:
 
         # --- Summary formatting: Value column → 임상 표기 규칙 적용 ---
         summary_obj = summary  # (상위 스코프의 summary 사용; 사전에 summary = None 가 있어야 함)
+        # ✅ [추가 부분 시작] env 항목 표시 여부 토글 + N/A 필터
+        DEBUG_SHOW_ENV = st.checkbox("Show envelope times (experimental)", value=False)
+
+        def _strip_na_env_rows(df):
+            """env 타임 항목이 N/A이면 임상 화면에서 숨김"""
+            if df is None or df.empty:
+                return df
+            env_labels = {
+                "VOnT_env (ms)",
+                "VOffT_env (ms)",
+                "OID = VOffT_env − GOT (ms)",
+                }
+                if not DEBUG_SHOW_ENV:
+                    mask_env = df["Parameter"].isin(env_labels)
+                    mask_na = df["Value"].astype(str).str.upper().eq("N/A")
+                    df = df[~(mask_env & mask_na)].reset_index(drop=True)
+                return df
+               
         if summary_obj is not None:
             try:
                 summary_fmt = summary_obj.copy()
@@ -1685,6 +1703,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
