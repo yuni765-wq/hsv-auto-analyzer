@@ -920,19 +920,26 @@ def analyze(df: pd.DataFrame, adv: dict):
             ("QC Iters",              _fmt_int(iters_local if 'iters_local' in locals() else np.nan)),
         ], columns=["Parameter", "Value"])
 
-    # 요약 직전 디버그 (동일 스코프)
-    try:
-        st.write("✅ QC Debug:", preset_label_local, qc_label_local, noise_ratio_local,
-                 est_rmse_local, global_gain_local, iters_local)
-    except Exception:
-        # local 변수 생성 실패 시 조용히 패스
-        pass
-        # ✅ 추가: result_env 내부 키 확인 (env 관련 키 존재 여부 확인용)
-    try:
-        st.write("🔍 DEBUG result_env keys:", list(result_env.keys()))
-    except Exception as e:
-        st.write("⚠️ result_env not found or invalid:", str(e))    
-
+    # --- QC Debug 패널 (요약 직전 동일 스코프) ---
+    with st.expander("🔧 QC Debug (세부 결과 보기)", expanded=st.session_state.get("debug_qc_expanded", False)):
+        try:
+            st.write("✅ QC Debug:", preset_label_local, qc_label_local, noise_ratio_local,
+                     est_rmse_local, global_gain_local, iters_local)
+        except Exception:
+            st.caption("⚠️ QC summary locals not available.")
+    
+        try:
+            st.markdown("**🔍 result_env keys:**")
+            st.json(list(result_env.keys()))
+        except Exception as e:
+            st.write("⚠️ result_env not found or invalid:", str(e))
+    
+    # 체크박스로 펼침 유지 여부 제어
+    if st.checkbox("📘 디버그 패널 기본 펼침 유지", value=st.session_state.get("debug_qc_expanded", False)):
+        st.session_state["debug_qc_expanded"] = True
+    else:
+        st.session_state["debug_qc_expanded"] = False
+    
     # 10) viz 패킷 ---------------------------------------------------------------
     try:
         viz = dict(
@@ -1712,6 +1719,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
