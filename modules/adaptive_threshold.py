@@ -317,23 +317,31 @@ def detect_gat_got_with_adaptive(
 
     # 3) 히스테리시스 기반 On/Off 마스크 생성
     min_run = max(1, int(round((min_run_ms / 1000.0) * fs)))
-
-    above = env >= thr_hi
-    gat_idx = _first_persistent_index(above, min_run)
-
-    # 전체 True 구간(발성) 마스크를 만들기 위해 한 번 올라간 후엔 thr_lo로 유지
+    above = (env >= thr_hi)
+    gat_idx = _first_persistent_index(above, min_run)  # 초기 퍼시스턴스 스캔 (없을 수도 있음)
+    
     state = False
     voiced = np.zeros(N, dtype=bool)
+    run = 0  # ✅ 퍼시스턴스 누적 카운터 추가
+    
     for i in range(N):
         if not state:
-            # 시작: thr_hi 이상이 min_run 지속되면 True로 전환
-            if i == gat_idx:
-                state = True
+            # 상승 구간 탐색: thr_hi 이상 지속 min_run 구간이면 True로 전환
+            if env[i] >= thr_hi[i]:
+                run += 1
+                if run >= min_run:
+                    state = True
+                    if gat_idx is None:  # ✅ gat_idx가 미리 없을 경우 여기서 동적 결정
+                        gat_idx = i - min_run + 1
+            else:
+                run = 0
         else:
-            # 유지: thr_lo 이상이면 계속 True
+            # 유지 조건: thr_lo 이상이면 유지, 아니면 종료
             if env[i] < thr_lo[i]:
                 state = False
+                run = 0
         voiced[i] = state
+
 
     # VOnT/VOffT 계산: 첫 True 시작 이후 첫 안정 peak/혹은 단순 상한 구간의 중앙값 근사
     # (여기서는 간단히 경계점으로 정의)
@@ -390,4 +398,5 @@ def detect_gat_got_with_adaptive(
         "preset": "Adaptive v3.3",
         "adaptive_qc": adaptive_qc,
     }
+
 
