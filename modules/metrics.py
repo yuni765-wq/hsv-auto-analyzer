@@ -9,7 +9,6 @@ ADAPTIVE_MODE = "full"
 # Absolute import within the package (no leading spaces!)
 from modules.adaptive_threshold import detect_gat_got_with_adaptive
 
-
 # ---------- Envelope ----------
 def compute_envelope(gray, fs, sg_window=21, sg_poly=3, norm=True):
     """
@@ -160,4 +159,5 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
