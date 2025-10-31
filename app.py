@@ -775,8 +775,8 @@ def analyze(df: pd.DataFrame, adv: dict):
 
 
     with st.expander("QC Debug (세부 결과 보기)", expanded=False):
-    st.json(qc)
-    st.caption(f"Preset: {preset_label}")
+        st.json(qc)
+        st.caption(f"Preset: {preset_label}")
 
 
     # --- 최신 QC 값을 세션 캐시에 강제 동기화 ---
@@ -1693,6 +1693,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
