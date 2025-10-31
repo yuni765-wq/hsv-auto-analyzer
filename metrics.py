@@ -2,19 +2,17 @@
 import numpy as np
 from scipy.signal import savgol_filter, find_peaks, welch, hilbert
 
+# --- Adaptive 엔진 사용/모드 설정 ---
+USE_ADAPTIVE = True              # 필요 시 False로 레거시만 사용
+ADAPTIVE_MODE = "full"           # "full" | "lite"
+
 # Adaptive Threshold Engine 연동 (모듈 경로 유연화)
 try:
-    from modules.adaptive_threshold import (
-        adaptive_optimize,
-        AdaptiveParams,
-        detect_gat_got_with_adaptive,   # ✅ 이 줄만 추가
-    )
+    # 정식 모듈 경로
+    from modules.adaptive_threshold import detect_gat_got_with_adaptive
 except Exception:
-    from adaptive_threshold import (
-        adaptive_optimize,
-        AdaptiveParams,
-        detect_gat_got_with_adaptive,   # ✅ 이 줄만 추가
-    )
+    # 로컬/백업 경로
+    from adaptive_threshold import detect_gat_got_with_adaptive
 
 # ---------- Envelope ----------
 def compute_envelope(gray, fs, sg_window=21, sg_poly=3, norm=True):
@@ -80,6 +78,23 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
              and loses stability for >= min_run_ms
       VOffT= last peak time before stable periodicity disappears completely
     """
+        # --- [ADD] Adaptive 엔진 분기 (성공하면 바로 반환, 실패시 폴백) ---
+    if USE_ADAPTIVE:
+        try:
+            res = detect_gat_got_with_adaptive(
+                env=np.asarray(env, dtype=float),
+                fs=float(fs),
+                k=k,
+                min_run_ms=min_run_ms,
+                win_cycles=win_cycles,
+                cv_max=cv_max,
+                # adaptive_params / reference_marks 필요 시 전달 가능
+            )
+            # 이 함수의 반환 순서를 유지: (GAT, VOnT, GOT, VOffT)
+            return res["gat_ms"], res["vont_ms"], res["got_ms"], res["vofft_ms"]
+        except Exception:
+            # 폴백: 아래 클래식 경로 계속 수행
+            pass
     base, thr_up, thr_dn = estimate_baseline_threshold(env, k=k)
     n = len(env)
     t = np.arange(n) / fs
@@ -256,6 +271,7 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
 
 
