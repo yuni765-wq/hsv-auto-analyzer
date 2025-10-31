@@ -793,6 +793,7 @@ def analyze(df: pd.DataFrame, adv: dict):
 
     # 9) 결과표 구성 --------------------------------------------------------------
     summary = None  # UnboundLocal 방지
+    viz = locals().get("viz", {}) if "viz" in locals() else {}
     try:
         # --- QC 추출(세션 캐시 우선 + 로컬 폴백) ---
         cache = st.session_state.get("qc_cache", {})
@@ -1252,9 +1253,21 @@ if (uploaded is not None) and ("Stats" in tab_names):
                 if "Value" in summary_fmt.columns:
                     # ms 단위는 2자리, 그 외 3자리
                     def _fmt_row(v, label=None):
-                        if isinstance(label, str) and ("ms" in label.lower()):
-                            return fmt_value(v, digits=2)
-                        return fmt_value(v, digits=3)
+                        import numpy as np
+                        # 숫자 여부 판정
+                        def _is_num(x):
+                            try:
+                                return (x is not None) and np.isfinite(float(x))
+                            except Exception:
+                                return False
+                    
+                        # 숫자는 자리수 규칙 적용, 그 외(문자열 등)는 그대로 출력
+                        if _is_num(v):
+                            if isinstance(label, str) and ("ms" in label.lower()):
+                                return fmt_value(v, digits=2)   # ms 항목
+                            return fmt_value(v, digits=3)       # 일반 숫자
+                        return v if v is not None else "N/A"    # 문자열(예: Preset, QC Label 등)
+
 
                     if "Parameter" in summary_fmt.columns:
                         summary_fmt["Value"] = [
@@ -1679,6 +1692,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
