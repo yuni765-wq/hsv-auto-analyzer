@@ -739,18 +739,35 @@ def analyze(df: pd.DataFrame, adv: dict):
             return np.nan
 
     result_env.update({
-        "gat_ms": gat_ms,
-        "vont_ms": vont_ms_env,
-        "got_ms": got_ms,
-        "vofft_ms": vofft_ms,
-        "oid_ms": oid_ms,
-        "tremor_index": tremor_ratio,
-        "preset": preset_label,
-        "qc_label": qc_label,
-        "noise_ratio": noise_ratio,
-        "est_rmse": est_rmse,
-        "global_gain": global_gain,
-        "qc_iters": iters,
+        "gat_ms": _num(gat_ms),
+
+        # ✅ 정확한 UI 키 (env 기반)
+        "vont_ms_env": _num(vont_ms_env),
+        "vofft_ms_env": _num(vofft_ms),
+
+        "got_ms": _num(got_ms),
+
+        # ✅ OID = VOffT_env − GOT
+        "oid_ms": (
+            _num(vofft_ms) - _num(got_ms)
+            if np.all(np.isfinite([_num(vofft_ms), _num(got_ms)]))
+            else np.nan
+        ),
+
+        # ✅ Tremor Index
+        "tremor_index": _num(tremor_ratio),
+
+        # ✅ Preset / QC 관련
+        "preset": str(preset_label),
+        "qc_label": str(qc_label) if qc_label is not None else "Unknown",
+        "noise_ratio": _num(noise_ratio),
+        "est_rmse": _num(est_rmse),
+        "global_gain": _num(global_gain),
+
+        # ✅ 반복횟수 (QC 이터레이션)
+        "qc_iters": int(iters)
+        if isinstance(iters, (int, np.integer, float)) and np.isfinite(iters)
+        else 0,
     })
 
     st.caption("QC Debug")
@@ -1597,6 +1614,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
