@@ -742,8 +742,8 @@ def analyze(df: pd.DataFrame, adv: dict):
         "gat_ms": _num(gat_ms),
 
         # ✅ 정확한 UI 키 (env 기반)
-        "vont_ms": _num(vont_ms_env),
-        "vofft_ms": _num(vofft_ms),
+        "vont_ms_env": _num(vont_ms_env),   # ✅ env 기반 VOnT
+        "vofft_ms": _num(vofft_ms),         # ✅ env 기반 VOffT
 
         "got_ms": _num(got_ms),
 
@@ -774,9 +774,10 @@ def analyze(df: pd.DataFrame, adv: dict):
     st.session_state["result_env"] = dict(result_env)
 
 
-    st.caption("QC Debug")
-    st.write("QC →", qc)
-    st.write("preset:", preset_label)
+    with st.expander("QC Debug (세부 결과 보기)", expanded=False):
+    st.json(qc)
+    st.caption(f"Preset: {preset_label}")
+
 
     # --- 최신 QC 값을 세션 캐시에 강제 동기화 ---
     if "qc_cache" not in st.session_state:
@@ -1016,8 +1017,8 @@ def render_overview(env: dict, keys=None):
     alias_map = {
         "GAT_ms":       ("gat_ms", "GAT_ms"),
         "GOT_ms":       ("got_ms", "GOT_ms"),
-        "VOnT_env_ms":  ("vont_ms_env", "VOnT_env_ms"),
-        "VOffT_env_ms": ("vofft_ms_env", "vofft_ms", "VOffT_env_ms"),
+        "VOnT_env_ms": ("vont_ms_env", "VOnT_env_ms", "vont_env_ms"),
+        "VOffT_env_ms": ("vofft_ms", "VOffT_env_ms", "vofft_env_ms"),
         "OID_ms":       ("oid_ms", "OID_ms"),
         "TremorIndex":  ("tremor_index", "TremorIndex"),
     }
@@ -1692,6 +1693,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
