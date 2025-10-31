@@ -843,7 +843,30 @@ def analyze(df: pd.DataFrame, adv: dict):
                 return str(int(v))
             except Exception:
                 return "N/A"
+            # ---- summary 표시용 안전 값 픽커 (locals → viz → session_state 순) ----
+        def _take_finite(*cands):
+            for v in cands:
+                try:
+                    if v is None:
+                        continue
+                    vv = float(v)
+                    if np.isfinite(vv):
+                        return vv
+                except Exception:
+                    continue
+            return np.nan
+    
+        ss_env = st.session_state.get("result_env", {}) if "result_env" in st.session_state else {}
+        viz_safe = viz if isinstance(viz, dict) else {}
+    
+        GAT_disp       = _take_finite(locals().get("gat_ms"),       viz_safe.get("GAT_ms"),        ss_env.get("gat_ms"))
+        GOT_disp       = _take_finite(locals().get("got_ms"),       viz_safe.get("GOT_ms"),        ss_env.get("got_ms"))
+        VOnT_env_disp  = _take_finite(locals().get("vont_ms_env"),  viz_safe.get("VOnT_env_ms"),   ss_env.get("vont_ms_env"))
+        VOffT_env_disp = _take_finite(locals().get("vofft_ms"),     viz_safe.get("VOffT_env_ms"),  ss_env.get("vofft_ms_env"))
+        OID_disp       = _take_finite(locals().get("oid_ms"),       viz_safe.get("OID_ms"),        ss_env.get("oid_ms"))
+        Tremor_disp    = _take_finite(locals().get("tremor_ratio"), viz_safe.get("TremorIndex"),   ss_env.get("tremor_index"))
 
+        
         # --- 행 구성 ---
         rows = [
             ("Amplitude Periodicity (AP)",            _fmt_f3(AP)),
@@ -856,12 +879,12 @@ def analyze(df: pd.DataFrame, adv: dict):
             ("PS_dist (0=normal)",                    _fmt_f3(PS_dist)),
             ("Voice Onset Time (VOnT, ms)",           _fmt_ms(VOnT)),
             ("Voice Offset Time (VOffT, ms)",         _fmt_ms(VOffT)),
-            ("GAT (ms)",                              _fmt_ms(gat_ms)),
-            ("GOT (ms)",                              _fmt_ms(got_ms)),
-            ("VOnT_env (ms)",                         _fmt_ms(vont_ms_env)),
-            ("VOffT_env (ms)",                        _fmt_ms(vofft_ms)),
-            ("OID = VOffT_env − GOT (ms)",            _fmt_ms(oid_ms)),
-            ("Tremor Index (4–5 Hz, env)",            "<0.001" if (isinstance(tremor_ratio, float) and np.isfinite(tremor_ratio) and tremor_ratio < 0.001) else _fmt_f3(tremor_ratio)),
+            ("GAT (ms)",                              _fmt_ms(GAT_disp)),
+            ("GOT (ms)",                              _fmt_ms(GOT_disp)),
+            ("VOnT_env (ms)",                         _fmt_ms(VOnT_env_disp)),
+            ("VOffT_env (ms)",                        _fmt_ms(VOffT_env_disp)),
+            ("OID = VOffT_env − GOT (ms)",            _fmt_ms(OID_disp)),
+            ("Tremor Index (4–5 Hz, env)",            "<0.001" if (isinstance(Tremor_disp, float) and np.isfinite(Tremor_disp) and Tremor_disp < 0.001) else _fmt_f3(Tremor_disp)),
             ("Preset",                                 preset_label_local if preset_label_local else "N/A"),
             ("QC Label",                               qc_label_local if qc_label_local else "N/A"),
             ("Residual Noise Ratio",                   _fmt_pct(noise_ratio_local)),
@@ -1656,6 +1679,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
