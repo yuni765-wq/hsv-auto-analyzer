@@ -1257,10 +1257,10 @@ with tabs[TAB_NAMES.index("Stats")]:
                 "VOffT_env (ms)",
                 "OID = VOffT_env − GOT (ms)",
                 }
-                if not DEBUG_SHOW_ENV:
-                    mask_env = df["Parameter"].isin(env_labels)
-                    mask_na = df["Value"].astype(str).str.upper().eq("N/A")
-                    df = df[~(mask_env & mask_na)].reset_index(drop=True)
+            if not DEBUG_SHOW_ENV:
+                mask_env = df["Parameter"].isin(env_labels)
+                mask_na = df["Value"].astype(str).str.upper().eq("N/A")
+                df = df[~(mask_env & mask_na)].reset_index(drop=True)
                 return df
                
         if summary_obj is not None:
@@ -1703,6 +1703,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
