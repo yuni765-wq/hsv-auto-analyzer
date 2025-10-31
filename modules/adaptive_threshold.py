@@ -197,6 +197,7 @@ def adaptive_optimize(envelope: np.ndarray,
                       base_threshold: float,
                       params: Optional[AdaptiveParams] = None,
                       reference_marks: Optional[Dict[str, float]] = None) -> AdaptiveResult:
+                      thr_lo_ratio_default = 0.85    
     """
     Adaptive 파이프라인:
     1) 잔류 노이즈 감지
@@ -281,11 +282,12 @@ def detect_gat_got_with_adaptive(
     min_run_ms: float = 12.0,
     win_cycles: int = 3,   # 자리만 유지 (호출 시그니처 호환)
     cv_max: float = 0.25,  # 자리만 유지
+    mode: str = "full",
 ):
     """
     1) 기본 임계값 추정(base, thr_up/thr_dn)
-    2) Adaptive 최적화로 thr_local/QC 추출
-    3) thr_local 기반 히스테리시스로 GAT/GOT/VOnT/VOffT 결정
+    2) Adaptive 최적화로 thr_local/QC 추출 (full)  |  Lite θ_on/θ_off 경로
+    3) 히스테리시스로 GAT/GOT/VOnT/VOffT 결정
     4) app.py가 기대하는 dict 반환
     """
     env = np.asarray(env, dtype=float)
@@ -307,9 +309,11 @@ def detect_gat_got_with_adaptive(
     # 2) Adaptive 최적화 (QC 포함)
     res = adaptive_optimize(env, sr_hz=float(fs), base_threshold=thr_up, params=None, reference_marks=None)
 
-    # 로컬 히스테리시스 상/하한 (로컬 임계값에 간단한 비율 적용)
+
     thr_hi = res.thr_local
-    thr_lo = res.thr_local * 0.85  # 하한(여유) — 필요시 조절
+    thr_lo_ratio = getattr(res, "thr_lo_ratio", thr_lo_ratio_default)  # ✅ 변경: 기본값(0.85) or AdaptiveParams에서 주입
+    thr_lo = res.thr_local * float(thr_lo_ratio)                       # ✅ 비율 적용
+
 
     # 3) 히스테리시스 기반 On/Off 마스크 생성
     min_run = max(1, int(round((min_run_ms / 1000.0) * fs)))
@@ -386,3 +390,4 @@ def detect_gat_got_with_adaptive(
         "preset": "Adaptive v3.3",
         "adaptive_qc": adaptive_qc,
     }
+
