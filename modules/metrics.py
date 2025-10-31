@@ -4,10 +4,15 @@ from scipy.signal import savgol_filter, find_peaks, welch, hilbert
 
 # --- Adaptive 엔진 사용/모드 설정 ---
 USE_ADAPTIVE = True              # 필요 시 False로 레거시만 사용
-ADAPTIVE_MODE = "full"           # "full" | "lite" (현재는 표시/전달용)
+ADAPTIVE_MODE = "full"           # "full" | "lite"
 
-# Adaptive Threshold Engine (single source of truth)
-from modules.adaptive_threshold import detect_gat_got_with_adaptive
+# Adaptive Threshold Engine 연동 (모듈 경로 유연화)
+try:
+    from modules.adaptive_threshold import detect_gat_got_with_adaptive
+except ImportError:
+    # 로컬 실행 환경에서 modules 패키지가 안 잡히는 경우 대비
+    from .adaptive_threshold import detect_gat_got_with_adaptive
+
 
 # ---------- Envelope ----------
 def compute_envelope(gray, fs, sg_window=21, sg_poly=3, norm=True):
@@ -160,4 +165,5 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
