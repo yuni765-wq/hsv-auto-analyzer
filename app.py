@@ -1205,7 +1205,7 @@ if (uploaded is not None) and ("Stats" in tab_names):
         env = dict(
             AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
             AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
-            Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms
+            Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms,
                 # ✅ 신규 6종: viz 패킷에서 끌어다 Overview로 전달
             GAT_ms      = viz.get("GAT_ms"),
             GOT_ms      = viz.get("GOT_ms"),
@@ -1656,6 +1656,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
