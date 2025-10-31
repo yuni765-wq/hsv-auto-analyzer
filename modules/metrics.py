@@ -62,6 +62,31 @@ def detect_gat_vont_got_vofft(env, fs, k=1.0, min_run_ms=12, win_cycles=4, cv_ma
                 win_cycles=int(win_cycles),
                 cv_max=float(cv_max),
             )
+                    # ---------- Save parameters for UI/CSV ----------
+        env_dict = {
+            "gat_ms": res["gat_ms"],
+            "vont_ms_env": res["vont_ms"],
+            "got_ms": res["got_ms"],
+            "vofft_ms_env": res["vofft_ms"],
+        }
+
+        # OID 계산
+        try:
+            env_dict["oid_ms"] = (
+                env_dict["vofft_ms_env"] - env_dict["got_ms"]
+                if (env_dict["vofft_ms_env"] is not None and env_dict["got_ms"] is not None)
+                else np.nan
+            )
+        except Exception:
+            env_dict["oid_ms"] = np.nan
+
+        # Tremor Index (4–5 Hz/1–20 Hz 파워비)
+        try:
+            env_dict["tremor_index"] = tremor_index_psd(env, fs)
+        except Exception:
+            env_dict["tremor_index"] = np.nan
+
+        # 상위(app.py) result_env.update(...)에서 이 키들을 읽을 수 있음
             return res["gat_ms"], res["vont_ms"], res["got_ms"], res["vofft_ms"]
         except Exception:
             pass
@@ -126,4 +151,5 @@ def tremor_index_psd(env, fs, band=(4.0, 5.0), total=(1.0, 20.0)):
     p_band = bandpower(*band)
     p_total = bandpower(*total) + 1e-12
     return p_band / p_total
+
 
