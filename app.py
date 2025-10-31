@@ -1207,37 +1207,34 @@ if uploaded is not None:
     Auto_Off_ms = det_res.get("offset_time_ms")
     Auto_Dur_ms = det_res.get("duration_ms")
 
-# ---------------- Tabs 생성 및 Overview 실행 ----------------
-# (A) uploaded is None일 때
-if uploaded is None:
-    st.info("📌 CSV/Excel 형식의 데이터를 업로드하면 분석/시각화 기능이 활성화됩니다.")
-    st.markdown("---")
-    tab_names = ["Parameter Comparison", "Batch Offset"]  # 업로드 없을 때는 그대로
-else:
-    # (B) 업로드가 있을 때: Overview → Stats
-    tab_names = ["Stats", "Visualization", "Batch Offset", "Parameter Comparison"]
+# ---------------- Tabs 생성 & Overview 실행 (고정 순서: Stats가 항상 첫 번째) ----------------
+TAB_NAMES = ["Stats", "Visualization", "Batch Offset", "Parameter Comparison"]
 
-# ✅ 상단 배지 영역(항상 생성)
+# 상단 배지 영역(항상 생성)
 top_banner = st.container()
 
-# ✅ 2) 탭 생성
-tabs = st.tabs(tab_names)
+# 탭 생성 (항상 같은 순서)
+tabs = st.tabs(TAB_NAMES)
 
-# ✅ 3) Stats 탭이 존재한다면 → 먼저 실행
-if (uploaded is not None) and ("Stats" in tab_names):
-    with tabs[tab_names.index("Stats")]:
-        # --- Overview용 환경 값 ---
+# ---- Stats 탭: 업로드 전/후 가드 ----
+with tabs[TAB_NAMES.index("Stats")]:
+    if uploaded is None:
+        st.info("📌 CSV/Excel 형식의 데이터를 업로드하면 분석/시각화 결과가 여기에 표시됩니다.")
+        st.markdown("---")
+    else:
+        # --- Overview용 환경 값 (기존 값들 유지) ---
         env = dict(
             AP=AP, TP=TP, PS_dist=PS_dist, AS_corr=AS_corr, AS_range=AS_range,
             AS_area=AS_area, VOnT=VOnT, VOffT=VOffT, fps=float(fps), ncyc=ncyc,
             Auto_On_ms=Auto_On_ms, Auto_Off_ms=Auto_Off_ms, Auto_Dur_ms=Auto_Dur_ms,
-                # ✅ 신규 6종: viz 패킷에서 끌어다 Overview로 전달
-            GAT_ms      = viz.get("GAT_ms"),
-            GOT_ms      = viz.get("GOT_ms"),
-            VOnT_env_ms = viz.get("VOnT_env_ms"),
-            VOffT_env_ms= viz.get("VOffT_env_ms"),
-            OID_ms      = viz.get("OID_ms"),
-            TremorIndex = viz.get("TremorIndex"),
+
+            # ✅ viz 패킷에서 끌어온 신규 6종 (UI 표시용 키)
+            GAT_ms       = viz.get("GAT_ms"),
+            GOT_ms       = viz.get("GOT_ms"),
+            VOnT_env_ms  = viz.get("VOnT_env_ms"),
+            VOffT_env_ms = viz.get("VOffT_env_ms"),
+            OID_ms       = viz.get("OID_ms"),
+            TremorIndex  = viz.get("TremorIndex"),
         )
 
         # --- Overview 렌더 (정의 확인 후 호출) ---
@@ -1247,28 +1244,24 @@ if (uploaded is not None) and ("Stats" in tab_names):
             st.warning("Overview renderer unavailable. Showing summary table only.", icon="⚠️")
 
         # --- Summary formatting: Value column → 임상 표기 규칙 적용 ---
-        summary_obj = summary  # ✅ 스코프 변수 직접 사용
+        summary_obj = summary  # (상위 스코프의 summary 사용; 사전에 summary = None 가 있어야 함)
         if summary_obj is not None:
             try:
                 summary_fmt = summary_obj.copy()
                 if "Value" in summary_fmt.columns:
-                    # ms 단위는 2자리, 그 외 3자리
+                    # ms 단위는 2자리, 그 외 숫자는 3자리, 문자열은 그대로
                     def _fmt_row(v, label=None):
                         import numpy as np
-                        # 숫자 여부 판정
                         def _is_num(x):
                             try:
                                 return (x is not None) and np.isfinite(float(x))
                             except Exception:
                                 return False
-                    
-                        # 숫자는 자리수 규칙 적용, 그 외(문자열 등)는 그대로 출력
                         if _is_num(v):
                             if isinstance(label, str) and ("ms" in label.lower()):
-                                return fmt_value(v, digits=2)   # ms 항목
-                            return fmt_value(v, digits=3)       # 일반 숫자
-                        return v if v is not None else "N/A"    # 문자열(예: Preset, QC Label 등)
-
+                                return fmt_value(v, digits=2)
+                            return fmt_value(v, digits=3)
+                        return v if v is not None else "N/A"
 
                     if "Parameter" in summary_fmt.columns:
                         summary_fmt["Value"] = [
@@ -1278,10 +1271,9 @@ if (uploaded is not None) and ("Stats" in tab_names):
                         summary_fmt["Value"] = summary_fmt["Value"].apply(lambda v: fmt_value(v, digits=3))
                 st.dataframe(summary_fmt, use_container_width=True)
             except Exception:
-                # 포맷 실패 시 원본 출력
                 st.dataframe(summary_obj, use_container_width=True)
 
-        # --- Tremor 섹션 카드 (임상 한글 + Research note 영문) ---
+        # --- Tremor 섹션 (옵션) ---
         try:
             tremor_val = viz.get("TremorIndex") if isinstance(viz, dict) else tremor_value
         except NameError:
@@ -1289,7 +1281,7 @@ if (uploaded is not None) and ("Stats" in tab_names):
         if callable(globals().get("render_tremor_section")):
             render_tremor_section(st, tremor_val, band_label="4–5 Hz")
 
-# ✅ 상단 pinned 배지: 절대 한 번만 렌더되도록 가드
+# ✅ 상단 pinned 배지: 한 번만 렌더
 if "__qi_banner_drawn__" not in st.session_state:
     st.session_state["__qi_banner_drawn__"] = False
 
@@ -1693,6 +1685,7 @@ if "Parameter Comparison" in tab_names:
 # -------------------- Footer --------------------
 st.markdown("---")
 st.caption("Developed collaboratively by Isaka & Lian · 2025 © HSV Auto Analyzer v3.1 Stable")
+
 
 
 
